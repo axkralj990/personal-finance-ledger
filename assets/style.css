@@ -1,0 +1,86 @@
+/* Global Styles */
+.app-div {
+    background-color: #2c2c2c;
+    color: #f9f9f9;
+    padding: 20px;
+}
+
+/* Style for headings (H1) */
+h1 {
+    color: #f9f9f9;
+}
+
+/* Horizontal rule styling */
+hr {
+    border-color: #444;
+}
+
+/* Flexbox for dropdown and button container */
+.dropdown-container {
+    /* display: flex; */
+    align-items: center;  /* Align vertically in the center */
+    background-color: #333;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+/* Dropdown styling */
+.Select-control {
+    background-color: #333 !important;
+    color: #f9f9f9 !important;
+}
+
+.Select-menu-outer {
+    background-color: #444 !important;
+}
+
+.Select-option {
+    color: #f9f9f9 !important;
+    background-color: #333 !important;
+}
+
+.Select-option.is-focused {
+    background-color: #555 !important;
+}
+
+/* Tabs Container Styling */
+.dcc-tabs {
+    background-color: #333 !important;  /* Dark background for tab container */
+}
+
+/* Tab Styling */
+.dcc-tabs .tab {
+    background-color: #555 !important;  /* Dark background for inactive tabs */
+    color: #f9f9f9 !important;          /* Light text color for inactive tabs */
+    border: 1px solid #444 !important;  /* Border color for tabs */
+}
+
+/* Styling for the Active/Selected Tab */
+.dcc-tabs .tab--selected {
+    background-color: #222 !important;  /* Darker background for active/selected tab */
+    color: #ffffff !important;          /* Light text for the active tab */
+    border-bottom: 3px solid #f9f9f9 !important;  /* Highlight active tab */
+}
+
+/* Button styling */
+button {
+    background-color: #444 !important;
+    color: #f9f9f9 !important;
+    border: 1px solid #555 !important;
+    padding: 10px 20px !important;
+    border-radius: 5px !important;
+}
+
+button:hover {
+    background-color: #333 !important;
+    border-color: #666 !important;
+}
+
+/* Plotly charts */
+.js-plotly-plot .plotly {
+    background-color: #2c2c2c;
+}
+
+.js-plotly-plot .main-svg {
+    color: #f9f9f9;
+}
