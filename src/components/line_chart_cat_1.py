@@ -1,3 +1,5 @@
+from re import I
+import pandas as pd
 import plotly.express as px
 from dash import Dash, dcc, html
 from dash.dependencies import Input, Output
@@ -9,7 +11,7 @@ from . import ids
 
 def render(app: Dash, source: DataSource) -> html.Div:
     @app.callback(
-        Output(ids.BAR_CHART_TIME_2, "children"),
+        Output(ids.LINE_CHART_CAT_1, "children"),
         [
             Input(ids.YEAR_DROPDOWN, "value"),
             Input(ids.MONTH_DROPDOWN, "value"),
@@ -17,7 +19,7 @@ def render(app: Dash, source: DataSource) -> html.Div:
             Input(ids.CATEGORY_2_DROPDOWN, "value"),
         ],
     )
-    def update_bar_chart(
+    def update_line_chart(
         years: list[str],
         months: list[str],
         category_1: list[str],
@@ -25,29 +27,41 @@ def render(app: Dash, source: DataSource) -> html.Div:
     ) -> html.Div:
         filtered_source = source.filter(years, months, category_1, category_2)
         if not filtered_source.row_count:
-            return html.Div("No data to display", id=ids.BAR_CHART_TIME_2)
+            return html.Div("No data to display", id=ids.LINE_CHART_CAT_1)
 
-        fig = px.bar(
-            filtered_source.create_pivot_table(
-                [
-                    TransactionsMapping.YEAR_MONTH["object"],
-                    TransactionsMapping.CATEGORY_2["object"],
-                ]
-            ),
-            x=TransactionsMapping.YEAR_MONTH["object"],
+        display_df = filtered_source.create_pivot_table(
+            [
+                TransactionsMapping.YEAR["object"],
+                TransactionsMapping.MONTH["object"],
+            ]
+        )
+
+        display_df[TransactionsMapping.MONTH["object"]] = pd.Categorical(
+            display_df[TransactionsMapping.MONTH["object"]],
+            categories=[str(i) for i in range(1, 13)],
+            ordered=True,
+        )
+
+        display_df.sort_values(
+            by=[
+                TransactionsMapping.YEAR["object"],
+                TransactionsMapping.MONTH["object"],
+            ],
+            inplace=True,
+        )
+
+        display_df[TransactionsMapping.YEAR["object"]] = pd.Categorical(
+            display_df[TransactionsMapping.YEAR["object"]],
+            categories=[str(i) for i in range(2021, 2025)],
+            ordered=True,
+        )
+
+        fig = px.line(
+            display_df,
+            x=TransactionsMapping.MONTH["object"],
             y=TransactionsMapping.AMOUNT["object"],
-            color=TransactionsMapping.CATEGORY_2["object"],
-            labels={
-                TransactionsMapping.CATEGORY_2[
-                    "object"
-                ]: TransactionsMapping.CATEGORY_2["label"],
-                TransactionsMapping.AMOUNT["object"]: TransactionsMapping.AMOUNT[
-                    "label"
-                ],
-                TransactionsMapping.YEAR_MONTH[
-                    "object"
-                ]: TransactionsMapping.YEAR_MONTH["label"],
-            },
+            color=TransactionsMapping.YEAR["object"],
+            markers=True,
         )
 
         fig.update_layout(
@@ -67,6 +81,6 @@ def render(app: Dash, source: DataSource) -> html.Div:
 
         fig.update_layout(showlegend=False)
 
-        return html.Div(dcc.Graph(figure=fig), id=ids.BAR_CHART_TIME_2)
+        return html.Div(dcc.Graph(figure=fig), id=ids.LINE_CHART_CAT_1)
 
-    return html.Div(id=ids.BAR_CHART_TIME_2)
+    return html.Div(id=ids.LINE_CHART_CAT_1)

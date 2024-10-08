@@ -1,4 +1,3 @@
-from re import L
 from dash import Dash
 from dash_bootstrap_components.themes import BOOTSTRAP
 
@@ -10,6 +9,7 @@ from src.config.mapping import ComponentsMapping
 
 DATA_PATH = "./data/transactions.csv"
 
+
 def main() -> None:
     # load the data and create the data manager
     data = load_transaction_data(DATA_PATH)
@@ -19,6 +19,7 @@ def main() -> None:
     app.title = ComponentsMapping.APP_TITLE
     app.layout = create_layout(app, data)
     app.run()
+
 
 if __name__ == "__main__":
     main()

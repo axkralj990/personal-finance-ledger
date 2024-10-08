@@ -6,6 +6,7 @@ from ..config.mapping import TransactionsMapping
 from ..data.source import DataSource
 from . import ids
 
+
 def render(app: Dash, source: DataSource) -> html.Div:
     @app.callback(
         Output(ids.BAR_CHART_1, "children"),
@@ -13,33 +14,83 @@ def render(app: Dash, source: DataSource) -> html.Div:
             Input(ids.YEAR_DROPDOWN, "value"),
             Input(ids.MONTH_DROPDOWN, "value"),
             Input(ids.CATEGORY_1_DROPDOWN, "value"),
-            Input(ids.CATEGORY_2_DROPDOWN, "value")
+            Input(ids.CATEGORY_2_DROPDOWN, "value"),
         ],
     )
     def update_bar_chart(
         years: list[str],
         months: list[str],
         category_1: list[str],
-        category_2: list[str]
+        category_2: list[str],
     ) -> html.Div:
         filtered_source = source.filter(years, months, category_1, category_2)
         if not filtered_source.row_count:
             return html.Div("No data to display", id=ids.BAR_CHART_1)
         elif len(category_1) < 2:
             filtered_source = source.filter(years, months, category_1, category_2)
-            return html.Div(html.H6(f"Total of {category_1[0]}: {filtered_source.total:.02f}"))
+            return html.Div(
+                html.H6(f"Total of {category_1[0]}: {filtered_source.total:.02f}")
+            )
 
         fig = px.bar(
-            filtered_source.create_pivot_table([TransactionsMapping.CATEGORY_1['object']]),
-            x=TransactionsMapping.CATEGORY_1['object'],
-            y=TransactionsMapping.AMOUNT['object'],
-            color=TransactionsMapping.CATEGORY_1['object'],
+            filtered_source.create_pivot_table(
+                [TransactionsMapping.CATEGORY_1["object"]]
+            ),
+            x=TransactionsMapping.CATEGORY_1["object"],
+            y=TransactionsMapping.AMOUNT["object"],
+            color=TransactionsMapping.CATEGORY_1["object"],
             labels={
-                TransactionsMapping.CATEGORY_1['object']: TransactionsMapping.CATEGORY_1['label'],
-                TransactionsMapping.AMOUNT['object']: TransactionsMapping.AMOUNT['label']
+                TransactionsMapping.CATEGORY_1[
+                    "object"
+                ]: TransactionsMapping.CATEGORY_1["label"],
+                TransactionsMapping.AMOUNT["object"]: TransactionsMapping.AMOUNT[
+                    "label"
+                ],
             },
         )
 
-        return html.Div(dcc.Graph(figure=fig), id=ids.BAR_CHART_1)
+        fig.update_layout(
+            plot_bgcolor="#2c2c2c",
+            paper_bgcolor="#2c2c2c",
+            font=dict(color="#f9f9f9"),
+            xaxis=dict(
+                showgrid=False,
+                color="#f9f9f9",
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor="#444",
+                color="#f9f9f9",
+            ),
+            margin=dict(l=0, r=0, t=0, b=0),  # Remove margins
+        )
 
-    return html.Div(id=ids.BAR_CHART_1)
+        return html.Div(
+            dcc.Graph(
+                figure=fig,
+                style={
+                    "height": "100%",
+                    "width": "100%",
+                },  # Full width, flexible height
+            ),
+            id=ids.BAR_CHART_1,
+            style={
+                "flex": "1",  # Allow this div to grow and shrink
+                "display": "flex",
+                "flex-direction": "column",
+                "width": "100%",  # Full width
+                "max-height": "500px",  # Set a max height for flexibility
+                "overflow": "hidden",  # Prevent overflow
+            },
+        )
+
+    return html.Div(
+        id=ids.BAR_CHART_1,
+        style={
+            "display": "flex",
+            "flex-direction": "column",
+            "height": "100vh",  # Full viewport height
+            "width": "100%",
+            "overflow": "hidden",  # Prevent overflow
+        },
+    )
