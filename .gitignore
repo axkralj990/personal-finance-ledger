@@ -157,3 +157,5 @@ cython_debug/
 
 # Sensitive data
 data/transactions.csv
+
+.DS_Store
