@@ -38,14 +38,12 @@ FINANCE_HOST_PORT=8000
 TIMEZONE=Europe/Ljubljana
 MAX_UPLOAD_BYTES=20971520
 MAX_FILE_ROWS=20000
-# Optional: enables reviewed ETF and stock quote refreshes.
-TWELVE_DATA_API_KEY=
 QUOTE_PREVIEW_MAX_AGE_HOURS=24
 ```
 
 `FINANCE_DATA_PATH` is a host path. Compose mounts it at the fixed container `DATA_DIR=/data`. `FRONTEND_DIST_PATH` is fixed at `/app/frontend/dist`.
-Manual portfolio valuations, ECB FX previews, and the LSE Yahoo Finance fallback work
-without a Twelve Data key. Keep the key only in `.env`; do not place it in `compose.yaml`,
+Manual portfolio valuations, ECB FX previews, and Yahoo Finance quotes work without an API
+key. Keep local settings only in `.env`; do not place them in `compose.yaml`,
 source control, screenshots, or logs.
 
 ## Create the Container Manager Project

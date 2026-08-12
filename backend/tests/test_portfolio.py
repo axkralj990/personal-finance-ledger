@@ -9,7 +9,6 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from pydantic import SecretStr
 from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
@@ -882,133 +881,14 @@ def test_history_preview_persists_multiple_dates_and_skips_existing_months(
     assert repeated["items"] == []
 
 
-def test_twelve_data_and_ecb_preview_normalization_uses_half_up_and_prior_rate(
+def test_yahoo_finance_returns_lse_quote_with_explicit_source(
     tmp_path: Path,
 ) -> None:
-    settings = Settings(
-        data_dir=tmp_path,
-        twelve_data_api_key=SecretStr("server-secret"),
-    )
-
+    settings = Settings(data_dir=tmp_path)
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.url.path.endswith("/quote"):
-            return httpx.Response(
-                200,
-                json={
-                    "symbol": "ACME",
-                    "name": "Acme Corp",
-                    "exchange": "NASDAQ",
-                    "mic_code": "XNAS",
-                    "currency": "USD",
-                    "datetime": "2026-08-09",
-                    "close": "1.0050",
-                },
-            )
-        return httpx.Response(
-            200,
-            text=("TIME_PERIOD,OBS_VALUE\n2026-08-07,1.25\n2026-08-11,1.20\n"),
-        )
-
-    provider = MarketDataClient(settings)
-    provider._client.close()
-    provider._client = httpx.Client(transport=httpx.MockTransport(handler))
-    asset = Asset(
-        id="asset-id",
-        name="Acme",
-        asset_type=AssetType.STOCK,
-        currency="USD",
-        acquisition_date=date(2026, 1, 1),
-        quantity="3",
-        cost_basis_native_minor=300,
-        cost_basis_eur_minor=240,
-        cost_basis_fx_source="MANUAL",
-        cost_basis_fx_rate_to_eur="0.8",
-        cost_basis_fx_rate_date=date(2026, 1, 1),
-        quote_symbol="ACME",
-        quote_exchange="NASDAQ",
-        quote_mic_code=None,
-        is_active=True,
-        revision=4,
-    )
-    with provider:
-        preview = provider.preview(asset)
-
-    assert preview.unit_price == "1.005"
-    assert preview.native_value_minor == 302
-    assert preview.fx_rate_to_eur == "0.8"
-    assert preview.fx_rate_date == date(2026, 8, 7)
-    assert preview.eur_value_minor == 242
-    assert "server-secret" not in repr(preview)
-    quote_request = requests[0]
-    assert "apikey" not in quote_request.url.params
-    assert "server-secret" not in str(quote_request.url)
-    assert quote_request.headers["authorization"] == "apikey server-secret"
-
-
-def test_twelve_data_http_error_exposes_provider_reason(tmp_path: Path) -> None:
-    settings = Settings(
-        data_dir=tmp_path,
-        twelve_data_api_key=SecretStr("server-secret"),
-    )
-
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            404,
-            json={
-                "code": 404,
-                "message": "This symbol is available starting with the Grow plan",
-                "status": "error",
-            },
-        )
-
-    provider = MarketDataClient(settings)
-    provider._client.close()
-    provider._client = httpx.Client(transport=httpx.MockTransport(handler))
-    asset = Asset(
-        id="asset-id",
-        name="CSPX",
-        asset_type=AssetType.ETF,
-        currency="USD",
-        acquisition_date=date(2022, 10, 2),
-        quantity="2",
-        quote_symbol="CSPX",
-        quote_exchange="LSE",
-        is_active=True,
-        revision=1,
-    )
-
-    with pytest.raises(MarketDataError) as error:
-        provider._fetch_quote(asset)
-    provider.__exit__()
-
-    assert error.value.code == "market_data_http_error"
-    assert error.value.message == "This symbol is available starting with the Grow plan"
-    assert error.value.recoverable is False
-
-
-def test_yahoo_finance_fallback_returns_lse_quote_with_explicit_source(
-    tmp_path: Path,
-) -> None:
-    settings = Settings(
-        data_dir=tmp_path,
-        twelve_data_api_key=SecretStr("server-secret"),
-    )
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.url.host == "api.twelvedata.com":
-            return httpx.Response(
-                404,
-                json={
-                    "code": 404,
-                    "message": "This symbol is available starting with the Grow plan",
-                    "status": "error",
-                },
-            )
         if request.url.host == "query1.finance.yahoo.com":
             return httpx.Response(
                 200,
@@ -1047,7 +927,7 @@ def test_yahoo_finance_fallback_returns_lse_quote_with_explicit_source(
         acquisition_date=date(2022, 10, 2),
         quantity="2",
         quote_symbol="CSPX",
-        quote_exchange="LSE",
+        quote_exchange="LSEETF",
         is_active=True,
         revision=1,
     )
@@ -1063,10 +943,149 @@ def test_yahoo_finance_fallback_returns_lse_quote_with_explicit_source(
     assert any(request.url.path.endswith("/CSPX.L") for request in requests)
 
 
+@pytest.mark.parametrize(
+    ("exchange", "mic_code", "symbol", "currency", "yahoo_symbol", "yahoo_exchange"),
+    [
+        ("LSEETF", None, "CSPX", "USD", "CSPX.L", "LSE"),
+        ("AEB", None, "IWDA", "EUR", "IWDA.AS", "AMS"),
+        ("IBIS2", None, "VWCE", "EUR", "VWCE.DE", "GER"),
+        ("LSEETF", "XLON", "ERNA", "USD", "ERNA.L", "LSE"),
+        ("AEB", "XAMS", "IWDA", "EUR", "IWDA.AS", "AMS"),
+        ("IBIS2", "XETR", "XEON", "EUR", "XEON.DE", "GER"),
+    ],
+)
+def test_yahoo_quote_maps_ibkr_venues(
+    tmp_path: Path,
+    exchange: str,
+    mic_code: str | None,
+    symbol: str,
+    currency: str,
+    yahoo_symbol: str,
+    yahoo_exchange: str,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "query1.finance.yahoo.com":
+            return httpx.Response(
+                200,
+                json={
+                    "chart": {
+                        "result": [
+                            {
+                                "meta": {
+                                    "currency": currency,
+                                    "symbol": yahoo_symbol,
+                                    "exchangeName": yahoo_exchange,
+                                    "regularMarketTime": 1786456472,
+                                    "regularMarketPrice": 100,
+                                    "exchangeTimezoneName": "Europe/London",
+                                    "longName": f"{symbol} ETF",
+                                }
+                            }
+                        ],
+                        "error": None,
+                    }
+                },
+            )
+        return httpx.Response(200, text="TIME_PERIOD,OBS_VALUE\n2026-08-10,1.25\n")
+
+    provider = MarketDataClient(Settings(data_dir=tmp_path))
+    provider._client.close()
+    provider._client = httpx.Client(transport=httpx.MockTransport(handler))
+    asset = Asset(
+        id="asset-id",
+        name=symbol,
+        asset_type=AssetType.ETF,
+        currency=currency,
+        acquisition_date=date(2026, 1, 1),
+        quantity="2",
+        quote_symbol=symbol,
+        quote_exchange=exchange,
+        quote_mic_code=mic_code,
+        is_active=True,
+        revision=1,
+    )
+
+    preview = provider.preview(asset)
+    provider.__exit__()
+
+    assert preview.source == ValuationSource.YAHOO_FINANCE
+    assert preview.native_value_minor == 20000
+    assert any(request.url.path.endswith(f"/{yahoo_symbol}") for request in requests)
+
+
+def test_yahoo_quote_is_fetched_once_for_multiple_lots(tmp_path: Path) -> None:
+    yahoo_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "query1.finance.yahoo.com":
+            yahoo_requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "chart": {
+                        "result": [
+                            {
+                                "meta": {
+                                    "currency": "EUR",
+                                    "symbol": "VWCE.DE",
+                                    "exchangeName": "GER",
+                                    "regularMarketTime": 1786456472,
+                                    "regularMarketPrice": 168.48,
+                                    "exchangeTimezoneName": "Europe/Berlin",
+                                    "longName": "Vanguard FTSE All-World UCITS ETF",
+                                }
+                            }
+                        ],
+                        "error": None,
+                    }
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    provider = MarketDataClient(Settings(data_dir=tmp_path))
+    provider._client.close()
+    provider._client = httpx.Client(transport=httpx.MockTransport(handler))
+    first = Asset(
+        id="first-lot",
+        name="VWCE",
+        asset_type=AssetType.ETF,
+        currency="EUR",
+        acquisition_date=date(2022, 1, 1),
+        quantity="2",
+        quote_symbol="VWCE",
+        quote_exchange="IBIS2",
+        is_active=True,
+        revision=1,
+    )
+    second = Asset(
+        id="second-lot",
+        name="VWCE",
+        asset_type=AssetType.ETF,
+        currency="EUR",
+        acquisition_date=date(2023, 1, 1),
+        quantity="3",
+        quote_symbol="VWCE",
+        quote_exchange="IBIS2",
+        is_active=True,
+        revision=1,
+    )
+
+    first_preview = provider.preview(first)
+    second_preview = provider.preview(second)
+    provider.__exit__()
+
+    assert len(yahoo_requests) == 1
+    assert first_preview.native_value_minor == 33696
+    assert second_preview.native_value_minor == 50544
+
+
 def test_yahoo_monthly_history_uses_month_ends_and_batched_ecb_rates(
     tmp_path: Path,
 ) -> None:
-    settings = Settings(data_dir=tmp_path, twelve_data_api_key=None)
+    settings = Settings(data_dir=tmp_path)
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1346,9 +1365,8 @@ def test_ljubljana_archive_date_controls_month_boundary(
     ]
 
 
-def test_blank_twelve_data_key_is_unconfigured(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path, twelve_data_api_key=SecretStr("   "))
-    assert settings.twelve_data_api_key is None
+def test_unsupported_yahoo_exchange_is_explicit(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path)
     asset = Asset(
         id="asset-id",
         name="Acme",
@@ -1365,9 +1383,8 @@ def test_blank_twelve_data_key_is_unconfigured(tmp_path: Path) -> None:
     )
     with MarketDataClient(settings) as provider, pytest.raises(MarketDataError) as error:
         provider.preview(asset)
-    assert error.value.code == "quote_providers_failed"
-    assert "Twelve Data is not configured" in error.value.message
-    assert "Yahoo Finance fallback is not configured for exchange NASDAQ" in error.value.message
+    assert error.value.code == "yahoo_exchange_unsupported"
+    assert error.value.message == "Yahoo Finance is not configured for exchange NASDAQ"
 
 
 def test_portfolio_openapi_contract(client: TestClient) -> None:

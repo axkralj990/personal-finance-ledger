@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,12 +16,6 @@ class Settings(BaseSettings):
     timezone: str = Field(default="Europe/Ljubljana", validation_alias="TIMEZONE")
     frontend_dist_path: Path = Field(
         default=Path("frontend/dist"), validation_alias="FRONTEND_DIST_PATH"
-    )
-    twelve_data_api_key: SecretStr | None = Field(
-        default=None, validation_alias="TWELVE_DATA_API_KEY"
-    )
-    twelve_data_base_url: str = Field(
-        default="https://api.twelvedata.com", validation_alias="TWELVE_DATA_BASE_URL"
     )
     yahoo_finance_base_url: str = Field(
         default="https://query1.finance.yahoo.com",
@@ -50,14 +44,6 @@ class Settings(BaseSettings):
     def valid_timezone(cls, value: str) -> str:
         ZoneInfo(value)
         return value
-
-    @field_validator("twelve_data_api_key", mode="before")
-    @classmethod
-    def blank_api_key_is_unconfigured(cls, value):
-        if value is None:
-            return None
-        secret = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
-        return SecretStr(secret.strip()) if secret.strip() else None
 
     @property
     def resolved_database_url(self) -> str:

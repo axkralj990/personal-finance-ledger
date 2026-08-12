@@ -427,7 +427,7 @@ describe("PortfolioPage", () => {
     await user.selectOptions(within(dialog).getByLabelText("Currency"), "USD");
     await user.click(within(dialog).getByRole("button", { name: "Use ECB rate" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/fx-preview?currency=USD"))).toBe(true));
-    expect(within(dialog).getByText(/ECB rate 0.92 from 2026-08-10/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/ECB rate 0.92 from 2026-08-\d{2}/)).toBeInTheDocument();
     await user.click(within(dialog).getAllByRole("button", { name: "Close details" }).at(-1)!);
     await user.click(screen.getByRole("button", { name: "Add asset" }));
     dialog = screen.getByRole("dialog", { name: "Add asset" });

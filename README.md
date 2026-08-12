@@ -62,23 +62,14 @@ in the models directory.
 ## Portfolio Quotes
 
 The Portfolio page supports manual dated valuations in EUR, USD, GBP, and CHF. Non-EUR
-values use signed ECB reference-rate previews. Twelve Data is the preferred quote provider;
-set its API key in `.env`:
+values use signed ECB reference-rate previews. Market quotes come from Yahoo Finance and
+record explicit `YAHOO_FINANCE` provenance. Yahoo Finance is an unofficial, keyless source
+and may change without notice. Quotes are reviewed before saving, and failed refreshes
+retain the previous valuation. Manual portfolio management works when Yahoo is unavailable.
 
-```dotenv
-TWELVE_DATA_API_KEY=your-personal-key
-```
-
-The key remains server-side. When Twelve Data cannot access an LSE instrument, the server
-falls back to Yahoo Finance and records explicit `YAHOO_FINANCE` provenance. Yahoo Finance
-is an unofficial, keyless source and may change without notice. Quotes are reviewed before
-saving, and failed refreshes retain the previous valuation. Manual portfolio management
-works when both providers are unavailable.
-
-For supported LSE holdings, **Update history** backfills missing completed months from Yahoo
-Finance and converts each month-end close with the corresponding ECB reference rate. The
-Portfolio graph can switch between aggregate history and an individual asset's market value,
-cost basis, and unrealized P&L. Re-running history updates only missing months.
+For supported London, Amsterdam, and Xetra holdings, **Update history** backfills missing
+completed months from Yahoo Finance and converts each month-end close with the corresponding
+ECB reference rate. Re-running history updates only missing months.
 
 ## Production Quick Start
 

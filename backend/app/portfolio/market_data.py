@@ -44,6 +44,30 @@ class _Quote:
     fetched_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class _YahooVenue:
+    key: str
+    suffix: str
+    exchange_names: frozenset[str]
+
+
+_LONDON = _YahooVenue("LONDON", ".L", frozenset({"LSE"}))
+_AMSTERDAM = _YahooVenue("AMSTERDAM", ".AS", frozenset({"AMS"}))
+_XETRA = _YahooVenue("XETRA", ".DE", frozenset({"GER"}))
+_YAHOO_VENUES = {
+    "LSEETF": _LONDON,
+    "LSE": _LONDON,
+    "XLON": _LONDON,
+    "AEB": _AMSTERDAM,
+    "AMS": _AMSTERDAM,
+    "XAMS": _AMSTERDAM,
+    "IBIS2": _XETRA,
+    "XETRA": _XETRA,
+    "GER": _XETRA,
+    "XETR": _XETRA,
+}
+
+
 class MarketDataClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -53,6 +77,7 @@ class MarketDataClient:
             headers={"User-Agent": "personal-finance-portfolio/1.0"},
         )
         self._fx_cache: dict[tuple[str, date], tuple[str, date]] = {}
+        self._quote_cache: dict[tuple[str, str, str], _Quote | MarketDataError] = {}
 
     def __enter__(self) -> MarketDataClient:
         return self
@@ -196,60 +221,24 @@ class MarketDataClient:
                 False,
             )
     def _fetch_market_quote(self, asset: Asset) -> tuple[_Quote, ValuationSource]:
-        twelve_error: MarketDataError
-        if self._settings.twelve_data_api_key is None:
-            twelve_error = MarketDataError(
-                "quote_provider_not_configured",
-                "Twelve Data is not configured on the server",
-                False,
-            )
-        else:
-            try:
-                return self._fetch_quote(asset), ValuationSource.TWELVE_DATA
-            except MarketDataError as exc:
-                twelve_error = exc
+        venue = _yahoo_venue(asset)
+        cache_key = (asset.quote_symbol or "", venue.key, asset.currency)
+        cached = self._quote_cache.get(cache_key)
+        if isinstance(cached, MarketDataError):
+            raise cached
+        if cached is not None:
+            return cached, ValuationSource.YAHOO_FINANCE
         try:
-            return self._fetch_yahoo_quote(asset), ValuationSource.YAHOO_FINANCE
-        except MarketDataError as yahoo_error:
-            raise MarketDataError(
-                "quote_providers_failed",
-                f"Twelve Data: {twelve_error.message} Yahoo Finance: {yahoo_error.message}",
-                twelve_error.recoverable or yahoo_error.recoverable,
-            ) from yahoo_error
+            quote = self._fetch_yahoo_quote(asset, venue)
+        except MarketDataError as exc:
+            self._quote_cache[cache_key] = exc
+            raise
+        self._quote_cache[cache_key] = quote
+        return quote, ValuationSource.YAHOO_FINANCE
 
-    def _fetch_quote(self, asset: Asset) -> _Quote:
-        params = {
-            "symbol": asset.quote_symbol,
-        }
-        if asset.quote_exchange:
-            params["exchange"] = asset.quote_exchange
-        if asset.quote_mic_code:
-            params["mic_code"] = asset.quote_mic_code
-        response = self._request(
-            f"{self._settings.twelve_data_base_url.rstrip('/')}/quote",
-            params=params,
-            headers={
-                "Authorization": (f"apikey {self._settings.twelve_data_api_key.get_secret_value()}")
-            },
-        )
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise MarketDataError(
-                "quote_provider_invalid_response",
-                "Twelve Data returned an invalid response",
-            ) from exc
-        if not isinstance(payload, dict) or payload.get("status") == "error":
-            raise MarketDataError(
-                "quote_provider_error",
-                _provider_error_message(
-                    payload, "Twelve Data could not return a quote for this asset"
-                ),
-            )
-        return self._normalize_quote(asset, payload)
-
-    def _fetch_yahoo_quote(self, asset: Asset) -> _Quote:
-        yahoo_symbol = _yahoo_symbol(asset)
+    def _fetch_yahoo_quote(self, asset: Asset, venue: _YahooVenue | None = None) -> _Quote:
+        venue = venue or _yahoo_venue(asset)
+        yahoo_symbol = _yahoo_symbol(asset, venue)
         response = self._request(
             f"{self._settings.yahoo_finance_base_url.rstrip('/')}/v8/finance/chart/"
             f"{url_quote(yahoo_symbol, safe='.-')}",
@@ -294,10 +283,10 @@ class MarketDataClient:
                 "yahoo_provider_invalid_response",
                 "Yahoo Finance returned incomplete quote data",
             ) from exc
-        if provider_symbol != yahoo_symbol or exchange != "LSE":
+        if provider_symbol != yahoo_symbol or exchange not in venue.exchange_names:
             raise MarketDataError(
                 "yahoo_identity_mismatch",
-                "Yahoo Finance instrument identity does not match the configured LSE ticker",
+                "Yahoo Finance instrument identity does not match the configured ticker and venue",
                 False,
             )
         if currency != asset.currency:
@@ -318,7 +307,8 @@ class MarketDataClient:
         )
 
     def _fetch_yahoo_history(self, asset: Asset) -> tuple[_Quote, ...]:
-        yahoo_symbol = _yahoo_symbol(asset)
+        venue = _yahoo_venue(asset)
+        yahoo_symbol = _yahoo_symbol(asset, venue)
         current_month = datetime.now(ZoneInfo(self._settings.timezone)).date().replace(day=1)
         first_month = asset.acquisition_date.replace(day=1)
         if first_month >= current_month:
@@ -367,10 +357,14 @@ class MarketDataClient:
                 "yahoo_history_invalid_response",
                 "Yahoo Finance returned incomplete monthly history",
             ) from exc
-        if provider_symbol != yahoo_symbol or exchange != "LSE" or currency != asset.currency:
+        if (
+            provider_symbol != yahoo_symbol
+            or exchange not in venue.exchange_names
+            or currency != asset.currency
+        ):
             raise MarketDataError(
                 "yahoo_identity_mismatch",
-                "Yahoo Finance history does not match the configured LSE instrument",
+                "Yahoo Finance history does not match the configured instrument",
                 False,
             )
         if any(
@@ -411,49 +405,6 @@ class MarketDataClient:
                 "Yahoo Finance returned invalid monthly history values",
             ) from exc
         return tuple(sorted(quotes, key=lambda item: item.valued_at))
-
-    def _normalize_quote(self, asset: Asset, payload: dict[str, Any]) -> _Quote:
-        try:
-            symbol = str(payload["symbol"]).strip().upper()
-            currency = str(payload["currency"]).strip().upper()
-            name = _provider_name(payload["name"])
-            exchange = _optional_upper(payload.get("exchange"))
-            mic_code = _optional_upper(payload.get("mic_code"))
-            unit_price = _provider_decimal(payload["close"], positive=True)
-            valued_at = date.fromisoformat(str(payload["datetime"])[:10])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise MarketDataError(
-                "quote_provider_invalid_response",
-                "Twelve Data returned incomplete quote data",
-            ) from exc
-        if symbol != asset.quote_symbol:
-            raise MarketDataError(
-                "quote_identity_mismatch",
-                "Provider instrument identity does not match the configured symbol",
-                False,
-            )
-        if asset.quote_exchange and exchange != asset.quote_exchange:
-            raise MarketDataError(
-                "quote_identity_mismatch",
-                "Provider instrument identity does not match the configured exchange",
-                False,
-            )
-        if asset.quote_mic_code and mic_code != asset.quote_mic_code:
-            raise MarketDataError(
-                "quote_identity_mismatch",
-                "Provider instrument identity does not match the configured MIC",
-                False,
-            )
-        return _Quote(
-            symbol=symbol,
-            name=name,
-            exchange=exchange,
-            mic_code=mic_code,
-            currency=currency,
-            valued_at=valued_at,
-            unit_price=unit_price,
-            fetched_at=datetime.now(UTC),
-        )
 
     def _fetch_ecb_rate(self, currency: str, valued_at: date) -> tuple[str, date]:
         url = f"{self._settings.ecb_data_base_url.rstrip('/')}/EXR/D.{currency}.EUR.SP00.A"
@@ -585,15 +536,27 @@ def _provider_price(value: Any, price_hint: int) -> str:
     return canonical_decimal(rounded)
 
 
-def _yahoo_symbol(asset: Asset) -> str:
-    exchange = (asset.quote_exchange or asset.quote_mic_code or "").upper()
-    if exchange not in {"LSE", "XLON"}:
+def _yahoo_venue(asset: Asset) -> _YahooVenue:
+    configured = {
+        value.strip().upper()
+        for value in (asset.quote_exchange, asset.quote_mic_code)
+        if value and value.strip()
+    }
+    venues = {_YAHOO_VENUES[value] for value in configured if value in _YAHOO_VENUES}
+    unsupported = configured - _YAHOO_VENUES.keys()
+    if unsupported or len(venues) != 1:
+        rendered = "/".join(sorted(configured)) or "unknown"
         raise MarketDataError(
             "yahoo_exchange_unsupported",
-            f"Yahoo Finance fallback is not configured for exchange {exchange or 'unknown'}",
+            f"Yahoo Finance is not configured for exchange {rendered}",
             False,
         )
-    return f"{asset.quote_symbol}.L"
+    return venues.pop()
+
+
+def _yahoo_symbol(asset: Asset, venue: _YahooVenue | None = None) -> str:
+    current_venue = venue or _yahoo_venue(asset)
+    return f"{asset.quote_symbol}{current_venue.suffix}"
 
 
 def _response_json(response: httpx.Response) -> Any:
