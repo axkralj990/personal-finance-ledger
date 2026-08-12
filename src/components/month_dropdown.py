@@ -33,7 +33,9 @@ def render(app: Dash, source: DataSource) -> html.Div:
                         options=to_dropdown_options(source.unique_months),
                         value=source.unique_months,
                         multi=True,
-                        style={"min-width": "200px"},
+                        style={
+                            "min-width": "200px",
+                        },
                     ),
                     html.Button(
                         className="dropdown-button",

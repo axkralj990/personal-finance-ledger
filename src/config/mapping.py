@@ -1,17 +1,17 @@
 class TransactionsMapping:
-    AMOUNT = {"file": "Amount", "object": "Amount", "label": "Amount"}
+    AMOUNT = {"file": "amount", "object": "amount", "label": "Amount"}
 
-    CATEGORY_1 = {"file": "Cat 1", "object": "Category_1", "label": "Category 1"}
+    CATEGORY_1 = {"file": "category", "object": "category_1", "label": "category"}
 
-    CATEGORY_2 = {"file": "Cat 2", "object": "Category_2", "label": "Category 2"}
+    CATEGORY_2 = {"file": "subcategory", "object": "category_2", "label": "subcategory"}
 
-    DATE = {"file": "Date", "object": "Date", "label": "Date", "format": "%B %d, %Y"}
+    DATE = {"file": "date", "object": "date", "label": "date", "format": "%Y-%m-%d %H:%M:%S"}
 
-    MONTH = {"file": "Month", "object": "Month", "label": "Month"}
+    MONTH = {"file": "month", "object": "month", "label": "month"}
 
-    YEAR = {"file": "Year", "object": "Year", "label": "Year"}
+    YEAR = {"file": "year", "object": "year", "label": "year"}
 
-    YEAR_MONTH = {"file": "Year_Month", "object": "Year_Month", "label": "Month"}
+    YEAR_MONTH = {"file": "year_month", "object": "year_month", "label": "month"}
 
 
 class ComponentsMapping:

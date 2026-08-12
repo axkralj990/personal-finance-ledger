@@ -1,0 +1,36 @@
+services:
+  app:
+    image: personal-finance:${FINANCE_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${FINANCE_HOST_PORT:-8000}:8000"
+    environment:
+      DATA_DIR: /data
+      DATABASE_URL: ""
+      FRONTEND_DIST_PATH: /app/frontend/dist
+      MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-20971520}"
+      MAX_FILE_ROWS: "${MAX_FILE_ROWS:-20000}"
+      TWELVE_DATA_API_KEY: "${TWELVE_DATA_API_KEY:-}"
+      YAHOO_FINANCE_BASE_URL: "${YAHOO_FINANCE_BASE_URL:-https://query1.finance.yahoo.com}"
+      MARKET_DATA_TIMEOUT_SECONDS: "${MARKET_DATA_TIMEOUT_SECONDS:-10}"
+      QUOTE_PREVIEW_MAX_AGE_HOURS: "${QUOTE_PREVIEW_MAX_AGE_HOURS:-24}"
+      TIMEZONE: "${TIMEZONE:-Europe/Ljubljana}"
+      TZ: "${TIMEZONE:-Europe/Ljubljana}"
+    volumes:
+      - "${FINANCE_DATA_PATH:-./data/runtime}:/data"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

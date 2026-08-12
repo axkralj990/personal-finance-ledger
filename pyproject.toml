@@ -1,0 +1,127 @@
+[project]
+name = "life-dashboard"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.16.4",
+    "dash-bootstrap-components==1.6.0",
+    "dash==2.18.1",
+    "fastapi>=0.116.1",
+    "httpx>=0.28.1",
+    "numpy==2.1.1",
+    "pandas==2.2.3",
+    "openpyxl>=3.1.5",
+    "pydantic-settings>=2.10.1",
+    "python-multipart>=0.0.20",
+    "rapidfuzz>=3.13.0",
+    "sqlalchemy>=2.0.40",
+    "pygments>=2.19.1",
+    "nbformat>=5.10.4",
+    "ipykernel>=6.29.5",
+    "ipython>=9.2.0",
+    "xlrd>=2.0.2",
+    "scikit-learn>=1.7.1",
+    "uvicorn>=0.35.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+    "ruff>=0.12.8",
+]
+
+[tool.ruff]
+line-length = 100
+indent-width = 4
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "B",    # flake8-bugbear
+    "I",    # isort
+    "N",    # pep8-naming
+    "PL",   # pylint-like
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+    "RUF",  # ruff-specific
+    "PERF", # performance
+    "SIM",  # flake8-simplify
+    "S",    # flake8-bandit (security)
+    "T",    # flake8-debugger and flake8-print
+    "FBT",  # boolean positional args
+    "EM",   # exception messages
+    "PGH",  # pygrep-hooks
+    "TRY",  # exception handling
+    "INP",  # implicit namespace packages
+    "PTH",  # pathlib usage
+]
+
+ignore = [
+    ### Type annotations and flexibility
+    "ANN",        # missing type annotations
+    "PYI063",     # return type in .pyi files
+
+    ### Code style & formatting
+    "COM",        # trailing commas
+    "EXE",        # executable bit
+    "E402",       # import not at top
+    "W293",       # blank lines with whitespace
+    "T201",       # allow print statements
+    "PTH123",     # allow `with open()`
+
+    ### Verbosity / readability
+    "ERA001",     # commented-out code
+    "EM101",      # string literals in exceptions
+    "EM102",
+    "G004",       # f-strings in logging
+    "TRY003",     # external messages in exceptions
+    "TRY300",
+
+    ### Function arguments / constants
+    "FBT001", "FBT002", "FBT003", # bools as positional args
+    "PLR0913",    # >5 function args
+    "PLR2004",    # magic numbers
+
+    ### Misc
+    "B905",       # zip() without strict
+    "PGH003",     # allow type: ignore
+    "S101",       # assert statements
+    "S301",       # pickle usage
+    "S603",       # subprocess without shell
+    "FIX002",     # verbose TODOs
+    "TD002", "TD003", # TODO formatting
+    "INP001",     # implicit namespace packages
+    "RUF015",     # suspicious __all__
+    "PERF401",    # no reason to use list-comp everywhere
+    "SIM105",
+]
+
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend", "src"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+force-single-line = false
+
+[tool.pyright]
+venvPath = "."         # uv installs the venv in the current dir
+venv = ".venv"         #       in a folder called `.venv`
+typeCheckingMode = "basic"
+pythonVersion = "3.12" # if library, specify the _lowest_ you support
+failOnWarnings = false # do not fail if there are warnings only
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

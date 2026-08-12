@@ -155,7 +155,49 @@ cython_debug/
 # VS Code settings
 .vscode/
 
-# Sensitive data
-data/transactions.csv
+# Personal and runtime data
+/data/
+/etf/
+**/uploads/
+**/backups/
+**/models/
+**/model-artifacts/
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite3-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Model artifacts
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.h5
+*.keras
+*.safetensors
+
+# Frontend outputs
+frontend/node_modules/
+frontend/dist/
+
+# Notebook-generated outputs
+*.ipynb
+.ipynb_checkpoints/
+notebooks/**/*.html
+notebooks/**/*.pdf
+notebooks/**/*_files/
+
+# Local credentials
+test_db.py
 
 .DS_Store

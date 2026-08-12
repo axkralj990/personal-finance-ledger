@@ -2,12 +2,11 @@ from dash import Dash
 from dash_bootstrap_components.themes import BOOTSTRAP
 
 from src.components.layout import create_layout
+from src.config.mapping import ComponentsMapping
 from src.data.loader import load_transaction_data
 from src.data.source import DataSource
 
-from src.config.mapping import ComponentsMapping
-
-DATA_PATH = "./data/transactions.csv"
+DATA_PATH = "./data/dashboard/transactions.csv"
 
 
 def main() -> None:

@@ -1,4 +1,3 @@
-from re import I
 import pandas as pd
 import plotly.express as px
 from dash import Dash, dcc, html
@@ -52,7 +51,7 @@ def render(app: Dash, source: DataSource) -> html.Div:
 
         display_df[TransactionsMapping.YEAR["object"]] = pd.Categorical(
             display_df[TransactionsMapping.YEAR["object"]],
-            categories=[str(i) for i in range(2021, 2025)],
+            categories=[str(i) for i in range(2021, 2026)],
             ordered=True,
         )
 

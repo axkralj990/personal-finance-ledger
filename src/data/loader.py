@@ -4,16 +4,16 @@ from src.config.mapping import TransactionsMapping
 
 
 def create_year_column(df: pd.DataFrame) -> pd.DataFrame:
-    df[TransactionsMapping.YEAR["object"]] = df[
-        TransactionsMapping.DATE["file"]
-    ].dt.year.astype(str)
+    df[TransactionsMapping.YEAR["object"]] = df[TransactionsMapping.DATE["file"]].dt.year.astype(
+        str
+    )
     return df
 
 
 def create_month_column(df: pd.DataFrame) -> pd.DataFrame:
-    df[TransactionsMapping.MONTH["object"]] = df[
-        TransactionsMapping.DATE["file"]
-    ].dt.month.astype(str)
+    df[TransactionsMapping.MONTH["object"]] = df[TransactionsMapping.DATE["file"]].dt.month.astype(
+        str
+    )
     return df
 
 
@@ -35,8 +35,8 @@ def load_transaction_data(path: str) -> pd.DataFrame:
             TransactionsMapping.DATE["file"]: str,
         },
     )
-    data["Date"] = pd.to_datetime(
-        data["Date"], format=TransactionsMapping.DATE["format"]
+    data[TransactionsMapping.DATE["file"]] = pd.to_datetime(
+        data[TransactionsMapping.DATE["file"]], format=TransactionsMapping.DATE["format"]
     )
     # replace missing values with misc
     data[TransactionsMapping.CATEGORY_2["file"]] = data[
@@ -46,22 +46,12 @@ def load_transaction_data(path: str) -> pd.DataFrame:
     data = data.rename(
         columns={
             TransactionsMapping.AMOUNT["file"]: TransactionsMapping.AMOUNT["object"],
-            TransactionsMapping.CATEGORY_1["file"]: TransactionsMapping.CATEGORY_1[
-                "object"
-            ],
-            TransactionsMapping.CATEGORY_2["file"]: TransactionsMapping.CATEGORY_2[
-                "object"
-            ],
+            TransactionsMapping.CATEGORY_1["file"]: TransactionsMapping.CATEGORY_1["object"],
+            TransactionsMapping.CATEGORY_2["file"]: TransactionsMapping.CATEGORY_2["object"],
             TransactionsMapping.DATE["file"]: TransactionsMapping.DATE["object"],
         }
     )
 
-    data[TransactionsMapping.AMOUNT["object"]] = np.abs(
-        data[TransactionsMapping.AMOUNT["object"]]
-    )
+    # data[TransactionsMapping.AMOUNT["object"]] = np.abs(data[TransactionsMapping.AMOUNT["object"]])
 
-    return (
-        data.pipe(create_year_column)
-        .pipe(create_month_column)
-        .pipe(create_year_month_column)
-    )
+    return data.pipe(create_year_column).pipe(create_month_column).pipe(create_year_month_column)

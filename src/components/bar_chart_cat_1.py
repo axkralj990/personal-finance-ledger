@@ -65,32 +65,36 @@ def render(app: Dash, source: DataSource) -> html.Div:
             margin=dict(l=0, r=0, t=0, b=0),  # Remove margins
         )
 
+        # return html.Div(
+        #     dcc.Graph(
+        #         figure=fig,
+        #         # style={
+        #         #     "height": "100vh",
+        #         #     "width": "100vh",
+        #         # },  # Full width, flexible height
+        #     ),
+        #     id=ids.BAR_CHART_1,
+        #     style={
+        #         "flex": "1",  # Allow this div to grow and shrink
+        #         "display": "flex",
+        #         "flex-direction": "column",
+        #         "max-height": "100%",  # Set a max height for flexibility
+        #         "overflow": "hidden",  # Prevent overflow
+        #     },
+        # )
+
         return html.Div(
-            dcc.Graph(
-                figure=fig,
-                style={
-                    "height": "100%",
-                    "width": "100%",
-                },  # Full width, flexible height
-            ),
-            id=ids.BAR_CHART_1,
-            style={
-                "flex": "1",  # Allow this div to grow and shrink
-                "display": "flex",
-                "flex-direction": "column",
-                "width": "100%",  # Full width
-                "max-height": "500px",  # Set a max height for flexibility
-                "overflow": "hidden",  # Prevent overflow
-            },
+            dcc.Graph(figure=fig, style={"height": "100%"}), id=ids.BAR_CHART_1
         )
 
-    return html.Div(
-        id=ids.BAR_CHART_1,
-        style={
-            "display": "flex",
-            "flex-direction": "column",
-            "height": "100vh",  # Full viewport height
-            "width": "100%",
-            "overflow": "hidden",  # Prevent overflow
-        },
-    )
+    return html.Div(id=ids.BAR_CHART_1)
+
+    # return html.Div(
+    #     id=ids.BAR_CHART_1,
+    #     style={
+    #         "display": "flex",
+    #         "flex-direction": "column",
+    #         "height": "100vh",  # Full viewport height
+    #         "overflow": "hidden",  # Prevent overflow
+    #     },
+    # )
