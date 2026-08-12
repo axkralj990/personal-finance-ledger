@@ -10,7 +10,7 @@ persistent data directory.
 - `frontend/`: React, TypeScript, and Vite SPA
 - `backend/`: FastAPI API, SQLAlchemy, Alembic migrations, and import CLI
 - `/data`: production SQLite database, retained uploads, backups, and model artifacts
-- Legacy Dash code remains in the repository for historical reference and is not included in the production image.
+- The pre-FastAPI Dash prototype is preserved on the `legacy` branch.
 
 The app has no authentication. Treat all transaction data as sensitive and expose the service only to a trusted LAN or VPN.
 

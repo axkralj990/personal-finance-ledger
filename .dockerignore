@@ -5,6 +5,8 @@
 !.env.example
 
 data/
+etf/
+*.ipynb
 test_db.py
 
 frontend/node_modules/
@@ -24,9 +26,7 @@ htmlcov/
 .coverage*
 
 .ipynb_checkpoints/
-notebooks/**/*.html
-notebooks/**/*.pdf
-notebooks/**/*_files/
+notebooks/
 
 **/uploads/
 **/backups/
