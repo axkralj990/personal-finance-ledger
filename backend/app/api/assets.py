@@ -236,9 +236,7 @@ def _asset_read(session: Session, asset: Asset) -> AssetRead:
     )
 
 
-def _idempotent_asset_read(
-    session: Session, asset: Asset, payload: AssetCreate
-) -> AssetRead:
+def _idempotent_asset_read(session: Session, asset: Asset, payload: AssetCreate) -> AssetRead:
     initial = session.scalar(
         select(AssetValuation)
         .where(AssetValuation.asset_id == asset.id)

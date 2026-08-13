@@ -2,8 +2,16 @@
 set -eu
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "$#" -ne 2 ]; then
+  echo "backup.sh is an internal command; use scripts/finance.sh backup" >&2
+  exit 2
+fi
 
-docker compose --project-directory "$project_dir" -f "$project_dir/compose.yaml" \
+env_file=$1
+project_name=$2
+
+docker compose --env-file "$env_file" --project-name "$project_name" \
+  --project-directory "$project_dir" -f "$project_dir/compose.yaml" \
   run --rm --no-deps app sh -c '
     set -eu
     umask 077

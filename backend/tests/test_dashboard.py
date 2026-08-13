@@ -8,10 +8,10 @@ from sqlalchemy import func, inspect, select
 
 from backend.app.api.dependencies import get_session
 from backend.app.database.models import (
+    Account,
     BatchStatus,
     Category,
     ImportBatch,
-    SourceAccount,
     StagedDisposition,
     StagedTransaction,
     Subcategory,
@@ -62,11 +62,9 @@ def _taxonomy(app: FastAPI) -> dict[str, str]:
 def _seed_transactions(app: FastAPI, rows: list[TransactionInput]) -> None:
     database: Database = app.state.database
     with database.session() as session:
-        account = session.scalar(
-            select(SourceAccount).where(SourceAccount.display_name == "Manual EUR")
-        )
+        account = session.scalar(select(Account).where(Account.name == "Unknown"))
         batch = ImportBatch(
-            source_account_id=account.id,
+            account_id=account.id,
             original_filename="dashboard-test",
             file_sha256="d" * 64,
             parser_version="test",
@@ -78,7 +76,7 @@ def _seed_transactions(app: FastAPI, rows: list[TransactionInput]) -> None:
             fingerprint = f"{row_number:064x}"
             staged = StagedTransaction(
                 batch_id=batch.id,
-                ledger_account_id=account.id,
+                account_id=account.id,
                 row_number=row_number,
                 raw_json={"dashboard_test": row_number},
                 transaction_date=row.transaction_date,
@@ -96,7 +94,7 @@ def _seed_transactions(app: FastAPI, rows: list[TransactionInput]) -> None:
             session.flush()
             session.add(
                 Transaction(
-                    source_account_id=account.id,
+                    account_id=account.id,
                     transaction_date=row.transaction_date,
                     description=row.description,
                     normalized_description=row.description.casefold(),
@@ -141,19 +139,19 @@ def test_dashboard_financial_semantics_prior_composition_recent_and_quality(
             TransactionInput(
                 date(2026, 1, 3),
                 -10,
-                TransactionKind.FEE,
+                TransactionKind.EXPENSE,
                 taxonomy["food"],
                 description="Bank fee",
             ),
             TransactionInput(
                 date(2026, 1, 4),
                 40,
-                TransactionKind.REFUND,
+                TransactionKind.INCOME,
                 taxonomy["food"],
                 taxonomy["groceries"],
                 description="Refund",
             ),
-            TransactionInput(date(2026, 1, 5), -999, TransactionKind.TRANSFER),
+            TransactionInput(date(2026, 1, 5), -999, TransactionKind.EXPENSE),
             TransactionInput(date(2026, 1, 6), -888, TransactionKind.EXPENSE, is_excluded=True),
             TransactionInput(date(2026, 1, 7), -777, TransactionKind.EXPENSE, currency="USD"),
             TransactionInput(
@@ -216,13 +214,10 @@ def test_dashboard_financial_semantics_prior_composition_recent_and_quality(
     }
     assert dashboard["cumulative"][-1]["cumulative_minor"] == -119
     assert dashboard["recent"][0]["description"] == "Cash purchase"
-    assert dashboard["recent"][0]["source_account_name"] == "Manual EUR"
+    assert dashboard["recent"][0]["account_name"] == "Unknown"
     assert {item["kind"] for item in dashboard["recent"]} == {
         "INCOME",
         "EXPENSE",
-        "FEE",
-        "REFUND",
-        "TRANSFER",
     }
 
     monthly_mean = dashboard["series"]["rolling_mean"]["month"]

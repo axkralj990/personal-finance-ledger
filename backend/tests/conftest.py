@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.app.config import Settings
-from backend.app.database.models import Provider, SourceAccount
+from backend.app.database.models import Account
 from backend.app.database.session import Database
 from backend.app.main import create_app
 
@@ -30,11 +30,10 @@ def database(settings: Settings) -> Iterator[Database]:
 
 
 @pytest.fixture
-def account(database: Database) -> SourceAccount:
+def account(database: Database) -> Account:
     with database.session() as session:
-        account = SourceAccount(
-            provider=Provider.LEGACY,
-            display_name="Synthetic checking",
+        account = Account(
+            name="Synthetic checking",
             default_currency="EUR",
         )
         session.add(account)

@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from backend.app.database.models import StagedDisposition, TransactionKind
 
@@ -20,14 +19,5 @@ class ParsedRow:
     disposition: StagedDisposition = StagedDisposition.PENDING
     ignore_reason: str | None = None
     issues: list[dict[str, Any]] = field(default_factory=list)
-    legacy_category: str | None = None
-    legacy_subcategory: str | None = None
-    legacy_source: str | None = None
     category_id: str | None = None
     subcategory_id: str | None = None
-
-
-class SourceAdapter(Protocol):
-    parser_version: str
-
-    def parse(self, path: Path, default_currency: str, max_rows: int) -> list[ParsedRow]: ...

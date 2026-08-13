@@ -7,11 +7,11 @@ from sqlalchemy import func, select
 
 from backend.app.config import Settings
 from backend.app.database.models import (
+    Account,
     BatchStatus,
     Category,
     ImportBatch,
     ModelVersion,
-    SourceAccount,
     StagedDisposition,
     StagedTransaction,
     Subcategory,
@@ -30,7 +30,7 @@ from backend.app.tagging.training import TrainingError, train_model
 
 
 def test_training_is_deterministic_and_replaces_active_model(
-    database: Database, settings: Settings, account: SourceAccount
+    database: Database, settings: Settings, account: Account
 ) -> None:
     with database.session() as session:
         labels = _seed_training_transactions(session, session.merge(account))
@@ -64,7 +64,7 @@ def test_training_is_deterministic_and_replaces_active_model(
 def test_artifact_metadata_checksum_cache_and_hierarchy(
     database: Database,
     settings: Settings,
-    account: SourceAccount,
+    account: Account,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -132,7 +132,7 @@ def test_artifact_metadata_checksum_cache_and_hierarchy(
 
 
 def test_low_confidence_prediction_stays_pending_with_proposal(
-    database: Database, settings: Settings, account: SourceAccount
+    database: Database, settings: Settings, account: Account
 ) -> None:
     with database.session() as session:
         labels = _seed_training_transactions(session, session.merge(account))
@@ -158,7 +158,7 @@ def test_low_confidence_prediction_stays_pending_with_proposal(
 
 
 def test_stale_or_removed_taxonomy_prevents_auto_acceptance(
-    database: Database, settings: Settings, account: SourceAccount
+    database: Database, settings: Settings, account: Account
 ) -> None:
     with database.session() as session:
         labels = _seed_training_transactions(session, session.merge(account))
@@ -181,7 +181,7 @@ def test_stale_or_removed_taxonomy_prevents_auto_acceptance(
 
 
 def test_staging_after_training_auto_labels_learned_merchant(
-    database: Database, settings: Settings, account: SourceAccount
+    database: Database, settings: Settings, account: Account
 ) -> None:
     with database.session() as session:
         labels = _seed_training_transactions(session, session.merge(account))
@@ -203,7 +203,7 @@ def test_staging_after_training_auto_labels_learned_merchant(
 
 
 def test_training_requires_two_category_classes(
-    database: Database, settings: Settings, account: SourceAccount
+    database: Database, settings: Settings, account: Account
 ) -> None:
     with database.session() as session:
         _seed_training_transactions(session, session.merge(account), food_only=True)
@@ -214,7 +214,7 @@ def test_training_requires_two_category_classes(
 def test_failed_artifact_verification_does_not_replace_active_model(
     database: Database,
     settings: Settings,
-    account: SourceAccount,
+    account: Account,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with database.session() as session:
@@ -235,7 +235,7 @@ def test_failed_artifact_verification_does_not_replace_active_model(
 
 
 def _seed_training_transactions(
-    session, account: SourceAccount, *, food_only: bool = False
+    session, account: Account, *, food_only: bool = False
 ) -> dict[str, str]:
     categories = {
         category.slug: category.id
@@ -271,7 +271,7 @@ def _seed_training_transactions(
         )
 
     batch = ImportBatch(
-        source_account_id=account.id,
+        account_id=account.id,
         original_filename="synthetic-training.csv",
         retained_path=None,
         file_sha256=hashlib.sha256(b"synthetic-training").hexdigest(),
@@ -290,7 +290,7 @@ def _seed_training_transactions(
             kind = TransactionKind.INCOME if amount > 0 else TransactionKind.EXPENSE
             staged = StagedTransaction(
                 batch_id=batch.id,
-                ledger_account_id=account.id,
+                account_id=account.id,
                 row_number=index,
                 raw_json={"synthetic": index},
                 transaction_date=date(2026, 1, index % 28 + 1),
@@ -308,7 +308,7 @@ def _seed_training_transactions(
             session.flush()
             session.add(
                 Transaction(
-                    source_account_id=account.id,
+                    account_id=account.id,
                     transaction_date=staged.transaction_date,
                     description=description,
                     normalized_description=normalized,

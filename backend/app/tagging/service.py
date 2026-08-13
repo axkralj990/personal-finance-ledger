@@ -5,11 +5,10 @@ from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from backend.app.database.models import (
+    Account,
     Category,
     ModelVersion,
-    Provider,
     RuleScope,
-    SourceAccount,
     StagedTransaction,
     Subcategory,
     TagRule,
@@ -41,7 +40,7 @@ def prepare_tagging(session: Session, data_dir: Path) -> TaggingContext:
 def apply_tagging(
     session: Session,
     staged: StagedTransaction,
-    account: SourceAccount,
+    account: Account,
     context: TaggingContext | None = None,
 ) -> None:
     rule = session.scalar(
@@ -54,16 +53,14 @@ def apply_tagging(
             or_(TagRule.subcategory_id.is_(None), Subcategory.is_active.is_(True)),
             TagRule.normalized_description == staged.normalized_description,
             (
-                (TagRule.scope == RuleScope.ACCOUNT) & (TagRule.source_account_id == account.id)
-                | (TagRule.scope == RuleScope.PROVIDER) & (TagRule.provider == account.provider)
+                (TagRule.scope == RuleScope.ACCOUNT) & (TagRule.account_id == account.id)
                 | (TagRule.scope == RuleScope.GLOBAL)
             ),
         )
         .order_by(
             case(
                 (TagRule.scope == RuleScope.ACCOUNT, 1),
-                (TagRule.scope == RuleScope.PROVIDER, 2),
-                else_=3,
+                else_=2,
             ),
             TagRule.created_at.desc(),
         )
@@ -109,13 +106,9 @@ def apply_tagging(
         staged.subcategory_id = subcategory_id
 
 
-def validate_rule_scope(
-    scope: RuleScope, account_id: str | None, provider: Provider | None
-) -> None:
-    valid = (
-        (scope == RuleScope.GLOBAL and account_id is None and provider is None)
-        or (scope == RuleScope.PROVIDER and account_id is None and provider is not None)
-        or (scope == RuleScope.ACCOUNT and account_id is not None and provider is None)
+def validate_rule_scope(scope: RuleScope, account_id: str | None) -> None:
+    valid = (scope == RuleScope.GLOBAL and account_id is None) or (
+        scope == RuleScope.ACCOUNT and account_id is not None
     )
     if not valid:
         raise ValueError("scope fields do not match rule scope")

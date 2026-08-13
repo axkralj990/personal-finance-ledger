@@ -15,6 +15,8 @@ from backend.app.database.models import (
 
 DRAFT_BATCH_STATUSES = {
     BatchStatus.UPLOADED,
+    BatchStatus.AWAITING_MAPPING,
+    BatchStatus.STAGING,
     BatchStatus.PARSED,
     BatchStatus.NEEDS_REVIEW,
     BatchStatus.READY,
@@ -63,7 +65,7 @@ def _find_exact_duplicate(
     if staged.source_native_id:
         native_match = session.scalar(
             select(Transaction).where(
-                Transaction.source_account_id == staged.ledger_account_id,
+                Transaction.account_id == staged.account_id,
                 Transaction.source_native_id == staged.source_native_id,
             )
         )
@@ -74,7 +76,7 @@ def _find_exact_duplicate(
                 select(StagedTransaction)
                 .join(ImportBatch)
                 .where(
-                    StagedTransaction.ledger_account_id == staged.ledger_account_id,
+                    StagedTransaction.account_id == staged.account_id,
                     ImportBatch.status.in_(DRAFT_BATCH_STATUSES),
                     StagedTransaction.disposition.in_(DRAFT_DISPOSITIONS),
                     StagedTransaction.source_native_id == staged.source_native_id,
@@ -91,7 +93,7 @@ def _find_exact_duplicate(
     if staged.row_fingerprint:
         fingerprint_match = session.scalar(
             select(Transaction).where(
-                Transaction.source_account_id == staged.ledger_account_id,
+                Transaction.account_id == staged.account_id,
                 Transaction.row_fingerprint == staged.row_fingerprint,
             )
         )
@@ -102,7 +104,7 @@ def _find_exact_duplicate(
                 select(StagedTransaction)
                 .join(ImportBatch)
                 .where(
-                    StagedTransaction.ledger_account_id == staged.ledger_account_id,
+                    StagedTransaction.account_id == staged.account_id,
                     ImportBatch.status.in_(DRAFT_BATCH_STATUSES),
                     StagedTransaction.disposition.in_(DRAFT_DISPOSITIONS),
                     StagedTransaction.row_fingerprint == staged.row_fingerprint,
@@ -126,7 +128,7 @@ def _likely_candidates(
     ):
         return None
     return select(Transaction).where(
-        Transaction.source_account_id == staged.ledger_account_id,
+        Transaction.account_id == staged.account_id,
         Transaction.currency == staged.currency,
         Transaction.amount_minor == staged.amount_minor,
         Transaction.transaction_date.between(
@@ -145,7 +147,7 @@ def _find_likely_staged_duplicate(
         select(StagedTransaction)
         .join(ImportBatch)
         .where(
-            StagedTransaction.ledger_account_id == staged.ledger_account_id,
+            StagedTransaction.account_id == staged.account_id,
             StagedTransaction.id != staged.id,
             StagedTransaction.currency == staged.currency,
             StagedTransaction.amount_minor == staged.amount_minor,

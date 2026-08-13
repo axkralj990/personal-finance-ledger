@@ -7,7 +7,8 @@ The SQLite database and retained files live below the host path configured by `F
 Run the included script from any directory:
 
 ```sh
-/volume1/docker/personal-finance/app/scripts/backup.sh
+git switch main
+./scripts/finance.sh backup
 ```
 
 It runs this application command in a one-off container:
@@ -21,7 +22,9 @@ The CLI uses SQLite's online backup API rather than copying a live database file
 For Synology Task Scheduler, create a scheduled **User-defined script** under an account allowed to run Docker:
 
 ```sh
-/volume1/docker/personal-finance/app/scripts/backup.sh >> /volume1/docker/personal-finance/backup.log 2>&1
+FINANCE_ENV_DIR=/volume1/docker/personal-finance/config \
+  /volume1/docker/personal-finance/app/scripts/finance.sh backup \
+  >> /volume1/docker/personal-finance/backup.log 2>&1
 ```
 
 Monitor the task and apply an explicit retention policy appropriate to available storage. The script never deletes old backups.
@@ -32,13 +35,17 @@ The SQLite database backup does not include `/data/uploads` or `/data/models`. P
 
 ## Restore
 
-Stop the app before replacing database files. The commands below preserve the current database and any WAL/SHM files in a timestamped rollback directory; uploads, backups, and models are not changed.
+Stop the production app before replacing database files. The commands below preserve the
+current database and any WAL/SHM files in a timestamped rollback directory; uploads, backups,
+and models are not changed. Set `FINANCE_DATA_PATH` to the same absolute value used in the
+external production environment file.
 
 ```sh
 cd /volume1/docker/personal-finance/app
-docker compose stop app
+export FINANCE_ENV_DIR=/volume1/docker/personal-finance/config
+./scripts/finance.sh stop
 
-export FINANCE_DATA_PATH=/volume1/docker/personal-finance/data
+export FINANCE_DATA_PATH=/volume1/docker/personal-finance/data/production
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 sudo mkdir -p "$FINANCE_DATA_PATH/restore-$stamp"
 for file in finance.sqlite3 finance.sqlite3-wal finance.sqlite3-shm; do
@@ -54,8 +61,8 @@ sudo chmod 600 "$FINANCE_DATA_PATH/finance.sqlite3.restore"
 sudo mv "$FINANCE_DATA_PATH/finance.sqlite3.restore" \
   "$FINANCE_DATA_PATH/finance.sqlite3"
 
-docker compose up -d app
-docker compose ps
+./scripts/finance.sh start
+./scripts/finance.sh status
 curl --fail http://127.0.0.1:8000/health
 ```
 

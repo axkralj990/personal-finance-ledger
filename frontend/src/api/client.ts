@@ -7,6 +7,13 @@ import {
   mapFxPreview,
   mapImportBatch,
   mapImportBatchPage,
+  mapImportInspection,
+  mapImportMappingTemplate,
+  mapImportMappingTemplates,
+  mapMappingPreview,
+  mapMappingConfirmation,
+  mapMappingSuggestionPayload,
+  mapMappingSuggestion,
   mapAsset,
   mapAssets,
   mapPortfolio,
@@ -14,7 +21,8 @@ import {
   mapQuotePreview,
   mapReportPoints,
   mapReportSummary,
-  mapSourceAccounts,
+  mapAccount,
+  mapAccounts,
   mapStagedTransactionPage,
   mapStagedTransactions,
   mapSubcategory,
@@ -35,6 +43,13 @@ import type {
   FxPreview,
   Identifier,
   ImportBatch,
+  ImportExecutionPlan,
+  ImportInspection,
+  ImportMappingTemplate,
+  MappingPreview,
+  MappingConfirmation,
+  MappingSuggestionPayload,
+  MappingSuggestion,
   ManualTransactionInput,
   ManualValuationCreateInput,
   Portfolio,
@@ -44,7 +59,8 @@ import type {
   ReportPoint,
   ReportQuery,
   ReportSummary,
-  SourceAccount,
+  Account,
+  AccountCreateInput,
   StagedRowPatch,
   StagedTransaction,
   Subcategory,
@@ -97,6 +113,34 @@ const snakePatch = (patch: StagedRowPatch) => ({
   ...(patch.ignoreReason !== undefined && { ignore_reason: patch.ignoreReason }),
   ...(patch.rememberCorrection !== undefined && { remember_correction: patch.rememberCorrection }),
 });
+
+const snakeNumberFormat = (format: ImportExecutionPlan["amount"]["numberFormat"]) => ({
+  decimal_separator: format.decimalSeparator,
+  thousands_separator: format.thousandsSeparator,
+  strip_currency_symbols: format.stripCurrencySymbols,
+  allow_parentheses: format.allowParentheses,
+  allow_trailing_minus: format.allowTrailingMinus,
+});
+
+const snakeExecutionPlan = (plan: ImportExecutionPlan): Record<string, unknown> => {
+  return {
+    plan_type: "universal", schema_version: plan.schemaVersion,
+    transaction_date: plan.transactionDate ? { source_column: plan.transactionDate.sourceColumn, format: plan.transactionDate.format } : null,
+    transaction_timestamp: plan.transactionTimestamp ? { source_column: plan.transactionTimestamp.sourceColumn, format: plan.transactionTimestamp.format, timezone: plan.transactionTimestamp.timezone } : null,
+    description: { source_column: plan.description.sourceColumn, strip: plan.description.strip, collapse_whitespace: plan.description.collapseWhitespace },
+    amount: plan.amount.kind === "signed"
+      ? { kind: "signed", source_column: plan.amount.sourceColumn, number_format: snakeNumberFormat(plan.amount.numberFormat), expense_sign_convention: plan.amount.signConvention }
+      : { kind: "debit_credit", debit_column: plan.amount.debitColumn, credit_column: plan.amount.creditColumn, number_format: snakeNumberFormat(plan.amount.numberFormat), debit_source_sign: plan.amount.debitSourceSign, credit_source_sign: plan.amount.creditSourceSign },
+    currency: plan.currency.kind === "source" ? { kind: "source", source_column: plan.currency.sourceColumn } : { kind: "constant", value: plan.currency.value },
+    source_native_id: plan.sourceNativeId ? { source_column: plan.sourceNativeId.sourceColumn } : null,
+    category_hint: plan.categoryHint ? { source_column: plan.categoryHint.sourceColumn } : null,
+    subcategory_hint: plan.subcategoryHint ? { source_column: plan.subcategoryHint.sourceColumn } : null,
+    row_bounds: { first_row: plan.rowBounds.firstRow, last_row: plan.rowBounds.lastRow },
+    exact_filters: plan.exactFilters.map((filter) => ({ source_column: filter.sourceColumn, mode: filter.mode, values: filter.values })),
+    skip_empty_rows: plan.skipEmptyRows, skip_repeated_headers: plan.skipRepeatedHeaders,
+    footer_rule: plan.footerRule ? { source_column: plan.footerRule.sourceColumn, normalized_value: plan.footerRule.normalizedValue } : null,
+  };
+};
 
 const reportQuery = ({ currency, dateFrom, dateTo }: ReportQuery) => ({
   currency,
@@ -156,31 +200,61 @@ export class ApiClient {
     return this.request("/health", {}, mapHealth);
   }
 
-  sourceAccounts = {
-    list: (): Promise<SourceAccount[]> => this.request(`${API_ROOT}/source-accounts`, {}, mapSourceAccounts),
+  accounts = {
+    list: (): Promise<Account[]> => this.request(`${API_ROOT}/accounts`, {}, mapAccounts),
+    create: (input: AccountCreateInput): Promise<Account> => this.request(`${API_ROOT}/accounts`, {
+      method: "POST",
+      body: JSON.stringify({ name: input.name, default_currency: input.defaultCurrency }),
+    }, mapAccount),
+    patch: (id: Identifier, input: { name?: string; active?: boolean }): Promise<Account> => this.request(`${API_ROOT}/accounts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ...(input.name !== undefined && { name: input.name }), ...(input.active !== undefined && { is_active: input.active }) }),
+    }, mapAccount),
   };
 
   imports = {
-    upload: (sourceAccountId: Identifier, file: File): Promise<ImportBatch> => {
+    upload: (accountId: Identifier, file: File): Promise<ImportBatch> => {
       const form = new FormData();
-      form.set("source_account_id", sourceAccountId);
+      form.set("account_id", accountId);
       form.set("file", file);
       return this.request(`${API_ROOT}/imports`, { method: "POST", body: form }, mapImportBatch);
     },
     list: (): Promise<ImportBatch[]> =>
       this.collectPages(`${API_ROOT}/imports`, 200, mapImportBatchPage),
     detail: (id: Identifier): Promise<ImportBatch> => this.request(`${API_ROOT}/imports/${id}`, {}, mapImportBatch),
+    inspection: (id: Identifier, pagination: { offset?: number; limit?: number } = {}): Promise<ImportInspection> => this.request(`${API_ROOT}/imports/${id}/inspection${this.query(pagination)}`, {}, mapImportInspection),
+    patchInspection: (id: Identifier, patch: { expectedRevision: number; selectedSheet: string; headerRow: number; previewOffset?: number; previewLimit?: number; confirmRestaging?: boolean }): Promise<ImportInspection> =>
+      this.request(`${API_ROOT}/imports/${id}/inspection${this.query({ offset: patch.previewOffset, limit: patch.previewLimit })}`, { method: "PATCH", body: JSON.stringify({ expected_revision: patch.expectedRevision, selected_sheet: patch.selectedSheet, header_row: patch.headerRow, confirm_restaging: patch.confirmRestaging ?? false }) }, mapImportInspection),
+    sourceFileUrl: (id: Identifier): string => `${API_ROOT}/imports/${id}/source-file`,
+    mappingSuggestionPayload: (id: Identifier): Promise<MappingSuggestionPayload> => this.request(`${API_ROOT}/imports/${id}/mapping-suggestion-payload`, {}, mapMappingSuggestionPayload),
+    suggestMapping: (id: Identifier, input: { expectedRevision: number; digest: string; consent: true }): Promise<MappingSuggestion> =>
+      this.request(`${API_ROOT}/imports/${id}/mapping-suggestion`, { method: "POST", body: JSON.stringify({ expected_revision: input.expectedRevision, payload_sha256: input.digest, consent: input.consent }) }, mapMappingSuggestion),
+    previewMapping: (id: Identifier, plan: ImportExecutionPlan, pagination: { offset?: number; limit?: number } = {}): Promise<MappingPreview> =>
+      this.request(`${API_ROOT}/imports/${id}/mapping-preview`, { method: "POST", body: JSON.stringify({ execution_plan: snakeExecutionPlan(plan), offset: pagination.offset ?? 0, limit: pagination.limit ?? 25 }) }, mapMappingPreview),
+    confirmMapping: (id: Identifier, input: { plan: ImportExecutionPlan; expectedRevision: number; templateId?: string | null; templateVersionId?: string | null; confirmRestaging?: boolean }): Promise<MappingConfirmation> =>
+      this.request(`${API_ROOT}/imports/${id}/mapping`, { method: "PUT", body: JSON.stringify({ expected_revision: input.expectedRevision, execution_plan: snakeExecutionPlan(input.plan), source_template_id: input.templateId ?? null, source_template_version_id: input.templateVersionId ?? null, confirm_restaging: input.confirmRestaging ?? false }) }, mapMappingConfirmation),
+    stage: (id: Identifier, expectedRevision: number, expectedMappingRevision: number): Promise<ImportBatch> =>
+      this.request(`${API_ROOT}/imports/${id}/stage`, { method: "POST", body: JSON.stringify({ expected_revision: expectedRevision, expected_mapping_revision: expectedMappingRevision }) }, mapImportBatch),
     rows: (id: Identifier): Promise<StagedTransaction[]> =>
       this.collectPages(`${API_ROOT}/imports/${id}/rows`, 500, mapStagedTransactionPage),
-    patchRows: (id: Identifier, patches: StagedRowPatch[]): Promise<StagedTransaction[]> =>
+    patchRows: (id: Identifier, expectedRevision: number, patches: StagedRowPatch[]): Promise<StagedTransaction[]> =>
       this.request(
         `${API_ROOT}/imports/${id}/rows`,
-        { method: "PATCH", body: JSON.stringify({ rows: patches.map(snakePatch) }) },
+        { method: "PATCH", body: JSON.stringify({ expected_revision: expectedRevision, rows: patches.map(snakePatch) }) },
         mapStagedTransactions,
       ),
-    commit: (id: Identifier): Promise<ImportBatch> =>
-      this.request(`${API_ROOT}/imports/${id}/commit`, { method: "POST" }, mapImportBatch),
-    delete: (id: Identifier): Promise<void> => this.request(`${API_ROOT}/imports/${id}`, { method: "DELETE" }, () => undefined),
+    commit: (id: Identifier, expectedRevision: number): Promise<ImportBatch> =>
+      this.request(`${API_ROOT}/imports/${id}/commit`, { method: "POST", body: JSON.stringify({ expected_revision: expectedRevision }) }, mapImportBatch),
+    delete: (id: Identifier, expectedRevision: number): Promise<void> => this.request(`${API_ROOT}/imports/${id}`, { method: "DELETE", body: JSON.stringify({ expected_revision: expectedRevision }) }, () => undefined),
+  };
+
+  importMappings = {
+    list: (query: { accountId?: Identifier; structuralSignature?: string; includeInactive?: boolean } = {}): Promise<ImportMappingTemplate[]> => this.request(`${API_ROOT}/import-mappings${this.query({ account_id: query.accountId, structural_signature: query.structuralSignature, include_inactive: query.includeInactive || undefined })}`, {}, mapImportMappingTemplates),
+    detail: (id: Identifier): Promise<ImportMappingTemplate> => this.request(`${API_ROOT}/import-mappings/${id}`, {}, mapImportMappingTemplate),
+    create: (input: { name: string; structuralSignature: string; accountId: Identifier | null; plan: ImportExecutionPlan; sourceBatchId?: Identifier; sourceBatchRevision?: number }): Promise<ImportMappingTemplate> =>
+      this.request(`${API_ROOT}/import-mappings`, { method: "POST", body: JSON.stringify({ name: input.name, structural_signature: input.structuralSignature, account_id: input.accountId, execution_plan: snakeExecutionPlan(input.plan), source_batch_id: input.sourceBatchId, source_batch_revision: input.sourceBatchRevision }) }, mapImportMappingTemplate),
+    patch: (id: Identifier, input: { expectedRevision: number; name?: string; active?: boolean; plan?: ImportExecutionPlan }): Promise<ImportMappingTemplate> =>
+      this.request(`${API_ROOT}/import-mappings/${id}`, { method: "PATCH", body: JSON.stringify({ expected_revision: input.expectedRevision, ...(input.name !== undefined && { name: input.name }), ...(input.active !== undefined && { is_active: input.active }), ...(input.plan && { execution_plan: snakeExecutionPlan(input.plan) }) }) }, mapImportMappingTemplate),
   };
 
   manualImports = {
@@ -189,12 +263,12 @@ export class ApiClient {
   };
 
   private createManualImport(rows: ManualTransactionInput[]): Promise<ImportBatch> {
-    const accountIds = new Set(rows.map((row) => row.sourceAccountId));
+    const accountIds = new Set(rows.map((row) => row.accountId));
     if (accountIds.size !== 1) {
       throw new ApiProblem(422, {
         code: "MANUAL_IMPORT_ACCOUNT_MISMATCH",
         message: "A manual import batch must contain rows from one source account.",
-        field: "source_account_id",
+        field: "account_id",
         recoverable: true,
       });
     }
@@ -203,7 +277,7 @@ export class ApiClient {
         {
           method: "POST",
           body: JSON.stringify({
-            source_account_id: rows[0]?.sourceAccountId,
+            account_id: rows[0]?.accountId,
             rows: rows.map((row) => ({
               transaction_date: row.date,
               description: row.description,
@@ -226,10 +300,9 @@ export class ApiClient {
         currency: query.currency,
         date_from: query.dateFrom,
         date_to: query.dateTo,
-        source_account_id: query.sourceAccountId,
+        account_id: query.accountId,
         category_id: query.categoryId,
         search: query.search,
-        include_excluded: query.includeExcluded,
       })}`, {}, mapTransactionPage),
     currencies: (): Promise<string[]> =>
       this.request(`${API_ROOT}/transactions/currencies`, {}, mapCurrencies),
@@ -243,7 +316,6 @@ export class ApiClient {
             amount_minor: patch.amountMinor,
             category_id: patch.categoryId,
             subcategory_id: patch.subcategoryId,
-            is_excluded: patch.excluded,
           }),
         },
         mapTransaction,
@@ -292,8 +364,7 @@ export class ApiClient {
           body: JSON.stringify({
             description: rule.match,
             scope: rule.scope,
-            provider: rule.provider,
-            source_account_id: rule.sourceAccountId,
+            account_id: rule.accountId,
             category_id: rule.categoryId,
             subcategory_id: rule.subcategoryId,
           }),

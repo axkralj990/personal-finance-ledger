@@ -1,0 +1,195 @@
+{
+  "batch_id": "batch-1",
+  "revision": 3,
+  "inspection": {
+    "inspection_version": "inspection-v1",
+    "execution_schema_version": "universal-v1",
+    "file_type": "XLSX",
+    "encoding": null,
+    "delimiter": null,
+    "quote_character": null,
+    "sheets": [
+      {
+        "name": "Transactions",
+        "index": 0,
+        "row_count": 33,
+        "column_count": 4,
+        "candidate_header_rows": [1, 2]
+      },
+      {
+        "name": "Archive",
+        "index": 1,
+        "row_count": 8,
+        "column_count": 4,
+        "candidate_header_rows": [2]
+      }
+    ],
+    "selected_sheet": "Transactions",
+    "header_row": 1,
+    "data_start_row": 2,
+    "data_end_row": 33,
+    "row_count": 32,
+    "blank_rows": [],
+    "repeated_header_rows": [18],
+    "possible_footer_rows": [33],
+    "columns": [
+      {
+        "id": "c000",
+        "position": 0,
+        "raw_label": "Date",
+        "normalized_label": "date",
+        "inferred_type": "DATE"
+      },
+      {
+        "id": "c001",
+        "position": 1,
+        "raw_label": "Description",
+        "normalized_label": "description",
+        "inferred_type": "TEXT"
+      },
+      {
+        "id": "c002",
+        "position": 2,
+        "raw_label": "Amount",
+        "normalized_label": "amount",
+        "inferred_type": "NUMBER"
+      },
+      {
+        "id": "c003",
+        "position": 3,
+        "raw_label": "Currency",
+        "normalized_label": "currency",
+        "inferred_type": "CURRENCY"
+      }
+    ],
+    "preview_offset": 0,
+    "preview": [
+      {
+        "row_number": 2,
+        "values": {
+          "c000": "2026-08-01",
+          "c001": "Cafe",
+          "c002": "-4.50",
+          "c003": "EUR"
+        }
+      }
+    ],
+    "structural_signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "proposals": {
+    "templates": [
+      {
+        "template_id": "template-account",
+        "template_version_id": "version-account-2",
+        "name": "Account card",
+        "scope": "ACCOUNT",
+        "origin": "MANUAL",
+        "execution_plan": {
+          "plan_type": "universal",
+          "schema_version": "universal-v1",
+          "transaction_date": {
+            "source_column": "c000",
+            "format": "%Y-%m-%d"
+          },
+          "transaction_timestamp": null,
+          "description": {
+            "source_column": "c001",
+            "strip": true,
+            "collapse_whitespace": true
+          },
+          "amount": {
+            "kind": "signed",
+            "source_column": "c002",
+            "number_format": {
+              "decimal_separator": ".",
+              "thousands_separator": null,
+              "strip_currency_symbols": true,
+              "allow_parentheses": false,
+              "allow_trailing_minus": false
+            },
+            "expense_sign_convention": "EXPENSES_NEGATIVE"
+          },
+          "currency": { "kind": "source", "source_column": "c003" },
+          "source_native_id": null,
+          "category_hint": null,
+          "subcategory_hint": null,
+          "row_bounds": { "first_row": null, "last_row": null },
+          "exact_filters": [],
+          "skip_empty_rows": true,
+          "skip_repeated_headers": true,
+          "footer_rule": null
+        }
+      },
+      {
+        "template_id": "template-global",
+        "template_version_id": "version-global-1",
+        "name": "Global card",
+        "scope": "GLOBAL",
+        "origin": "MANUAL",
+        "execution_plan": {
+          "plan_type": "universal",
+          "schema_version": "universal-v1",
+          "transaction_date": {
+            "source_column": "c000",
+            "format": "%Y-%m-%d"
+          },
+          "transaction_timestamp": null,
+          "description": {
+            "source_column": "c001",
+            "strip": true,
+            "collapse_whitespace": true
+          },
+          "amount": {
+            "kind": "signed",
+            "source_column": "c002",
+            "number_format": {
+              "decimal_separator": ".",
+              "thousands_separator": null,
+              "strip_currency_symbols": true,
+              "allow_parentheses": false,
+              "allow_trailing_minus": false
+            },
+            "expense_sign_convention": "EXPENSES_NEGATIVE"
+          },
+          "currency": { "kind": "source", "source_column": "c003" },
+          "source_native_id": null,
+          "category_hint": null,
+          "subcategory_hint": null,
+          "row_bounds": { "first_row": null, "last_row": null },
+          "exact_filters": [],
+          "skip_empty_rows": true,
+          "skip_repeated_headers": true,
+          "footer_rule": null
+        }
+      }
+    ],
+    "universal": {
+      "plan_type": "universal",
+      "schema_version": "universal-v1",
+      "transaction_date": { "source_column": "c000", "format": "%Y-%m-%d" },
+      "transaction_timestamp": null,
+      "description": { "source_column": "c001", "strip": true, "collapse_whitespace": true },
+      "amount": {
+        "kind": "signed",
+        "source_column": "c002",
+        "number_format": {
+          "decimal_separator": ".",
+          "thousands_separator": null,
+          "strip_currency_symbols": true,
+          "allow_parentheses": false,
+          "allow_trailing_minus": false
+        },
+        "expense_sign_convention": "EXPENSES_POSITIVE"
+      },
+      "currency": { "kind": "source", "source_column": "c003" },
+      "source_native_id": null,
+      "category_hint": null,
+      "subcategory_hint": null,
+      "row_bounds": { "first_row": null, "last_row": null },
+      "exact_filters": [],
+      "skip_empty_rows": true,
+      "skip_repeated_headers": true,
+      "footer_rule": null
+    }
+  }
+}

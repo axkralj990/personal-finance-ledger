@@ -121,12 +121,18 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.*.example
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Host deployment configuration belongs outside the repository
+/environments/*.env
 
 # Spyder project settings
 .spyderproject

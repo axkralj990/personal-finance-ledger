@@ -11,11 +11,10 @@ from sqlalchemy.exc import OperationalError
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from backend.app.database.models import (
+    Account,
     BatchStatus,
     Category,
     ImportBatch,
-    Provider,
-    SourceAccount,
     StagedDisposition,
     StagedTransaction,
     Transaction,
@@ -34,15 +33,14 @@ def test_reporting_never_mixes_currencies(app, client: TestClient) -> None:
     database: Database = app.state.database
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "income"))
-        account = SourceAccount(
-            provider=Provider.MANUAL,
-            display_name="Synthetic wallet",
+        account = Account(
+            name="Synthetic wallet",
             default_currency="EUR",
         )
         session.add(account)
         session.flush()
         batch = ImportBatch(
-            source_account_id=account.id,
+            account_id=account.id,
             original_filename="manual",
             file_sha256="f" * 64,
             parser_version="test",
@@ -53,7 +51,7 @@ def test_reporting_never_mixes_currencies(app, client: TestClient) -> None:
         for row_number, (currency, amount) in enumerate((("EUR", 1000), ("USD", 9000)), 1):
             staged = StagedTransaction(
                 batch_id=batch.id,
-                ledger_account_id=account.id,
+                account_id=account.id,
                 row_number=row_number,
                 raw_json={"currency": currency},
                 transaction_date=date(2026, 1, row_number),
@@ -70,7 +68,7 @@ def test_reporting_never_mixes_currencies(app, client: TestClient) -> None:
             session.flush()
             session.add(
                 Transaction(
-                    source_account_id=account.id,
+                    account_id=account.id,
                     transaction_date=staged.transaction_date,
                     description=staged.description,
                     normalized_description=staged.normalized_description,
@@ -105,11 +103,9 @@ def test_active_taxonomy_is_required_for_rules_and_transaction_corrections(
     database: Database = app.state.database
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "food"))
-        account = session.scalar(
-            select(SourceAccount).where(SourceAccount.provider == Provider.MANUAL)
-        )
+        account = session.scalar(select(Account).where(Account.name == "Unknown"))
         batch = ImportBatch(
-            source_account_id=account.id,
+            account_id=account.id,
             original_filename="taxonomy-test",
             file_sha256="1" * 64,
             parser_version="test",
@@ -119,7 +115,7 @@ def test_active_taxonomy_is_required_for_rules_and_transaction_corrections(
         session.flush()
         staged = StagedTransaction(
             batch_id=batch.id,
-            ledger_account_id=account.id,
+            account_id=account.id,
             row_number=1,
             raw_json={},
             transaction_date=date(2026, 1, 1),
@@ -135,7 +131,7 @@ def test_active_taxonomy_is_required_for_rules_and_transaction_corrections(
         session.add(staged)
         session.flush()
         transaction = Transaction(
-            source_account_id=account.id,
+            account_id=account.id,
             transaction_date=staged.transaction_date,
             description=staged.description,
             normalized_description=staged.normalized_description,
@@ -169,6 +165,25 @@ def test_active_taxonomy_is_required_for_rules_and_transaction_corrections(
     assert rule_response.json()["code"] == "category_not_found"
     assert transaction_response.status_code == 422
     assert transaction_response.json()["code"] == "category_not_found"
+
+
+def test_tag_rules_reject_removed_provider_scope(client: TestClient) -> None:
+    category = next(
+        item for item in client.get("/api/v1/categories").json() if item["slug"] == "food"
+    )
+
+    response = client.post(
+        "/api/v1/tag-rules",
+        json={
+            "description": "Coffee",
+            "scope": "GLOBAL",
+            "provider": "REVOLUT",
+            "category_id": category["id"],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
 
 
 def test_sqlite_lock_is_a_recoverable_service_unavailable(app, client: TestClient) -> None:
@@ -227,14 +242,12 @@ def test_upload_stream_failure_removes_partial_file(
 
     monkeypatch.setattr(StarletteUploadFile, "read", fail_after_first_read)
     with app.state.database.session() as session:
-        account = session.scalar(
-            select(SourceAccount).where(SourceAccount.provider == Provider.LEGACY)
-        )
+        account = session.scalar(select(Account).where(Account.name == "Unknown"))
 
     with pytest.raises(OSError, match="synthetic upload interruption"):
         client.post(
             "/api/v1/imports",
-            data={"source_account_id": account.id},
+            data={"account_id": account.id},
             files={
                 "file": (
                     "partial.csv",

@@ -15,10 +15,21 @@ import type {
   DashboardRollingMeanPoint,
   DashboardSeriesPoint,
   DuplicateState,
+  ExpenseSignConvention,
   FxPreview,
   Health,
   ImportBatch,
+  ImportDiagnostic,
+  ImportExecutionPlan,
+  ImportInspection,
+  ImportMappingTemplate,
   ImportStatus,
+  MappingOrigin,
+  MappingConfirmation,
+  MappingPreview,
+  MappingProposal,
+  MappingSuggestionPayload,
+  MappingSuggestion,
   Page,
   Portfolio,
   PortfolioHistoryPoint,
@@ -28,7 +39,7 @@ import type {
   ReportPoint,
   ReportSummary,
   RowDisposition,
-  SourceAccount,
+  Account,
   StagedTransaction,
   Subcategory,
   TagRule,
@@ -71,39 +82,215 @@ const records = (input: unknown): unknown[] => {
   return array(value(root, "items", "results", "data", "rows"));
 };
 
+const nested = (input: unknown, ...keys: string[]): JsonObject => {
+  const root = object(input);
+  const candidate = value(root, ...keys);
+  return Object.keys(object(candidate)).length ? object(candidate) : root;
+};
+
+const mapDiagnostic = (input: unknown): ImportDiagnostic => {
+  const item = object(input);
+  return {
+    code: text(item.code, "import_diagnostic"),
+    message: text(item.message ?? item.detail ?? input),
+    field: nullableText(item.field),
+    rowNumber: nullableNumber(value(item, "row_number", "rowNumber", "row")),
+    severity: text(item.severity, "ERROR").toUpperCase() as ImportDiagnostic["severity"],
+  };
+};
+
+const mapNumberFormat = (input: unknown) => {
+  const item = object(input);
+  return {
+    decimalSeparator: text(value(item, "decimal_separator", "decimalSeparator"), ".") as "." | ",",
+    thousandsSeparator: nullableText(value(item, "thousands_separator", "thousandsSeparator")),
+    stripCurrencySymbols: bool(value(item, "strip_currency_symbols", "stripCurrencySymbols"), true),
+    allowParentheses: bool(value(item, "allow_parentheses", "allowParentheses")),
+    allowTrailingMinus: bool(value(item, "allow_trailing_minus", "allowTrailingMinus")),
+  };
+};
+
+export const mapImportExecutionPlan = (input: unknown): ImportExecutionPlan => {
+  const item = nested(input, "plan", "execution_plan", "executionPlan", "mapping");
+  if (text(value(item, "plan_type", "planType")) !== "universal") {
+    throw new Error("Import mapping response is not a universal plan.");
+  }
+  const date = object(value(item, "transaction_date", "transactionDate"));
+  const timestamp = object(value(item, "transaction_timestamp", "transactionTimestamp"));
+  const description = object(item.description);
+  const amount = object(item.amount);
+  const currency = object(item.currency);
+  const optionalSource = (candidate: unknown) => {
+    const source = object(candidate);
+    const sourceColumn = text(value(source, "source_column", "sourceColumn"));
+    return sourceColumn ? { sourceColumn } : null;
+  };
+  const numberFormat = mapNumberFormat(value(amount, "number_format", "numberFormat"));
+  const amountMapping = text(amount.kind, "signed") === "debit_credit"
+    ? {
+        kind: "debit_credit" as const,
+        debitColumn: text(value(amount, "debit_column", "debitColumn")),
+        creditColumn: text(value(amount, "credit_column", "creditColumn")),
+        numberFormat,
+        debitSourceSign: text(value(amount, "debit_source_sign", "debitSourceSign"), "positive") as "positive" | "negative",
+        creditSourceSign: text(value(amount, "credit_source_sign", "creditSourceSign"), "positive") as "positive" | "negative",
+      }
+    : {
+        kind: "signed" as const,
+        sourceColumn: text(value(amount, "source_column", "sourceColumn")),
+        numberFormat,
+        signConvention: text(amount.expense_sign_convention, "EXPENSES_NEGATIVE") as ExpenseSignConvention,
+      };
+  const currencyMapping = text(currency.kind, "source") === "constant"
+    ? { kind: "constant" as const, value: text(currency.value).toUpperCase() }
+    : { kind: "source" as const, sourceColumn: text(value(currency, "source_column", "sourceColumn")) };
+  const rowBounds = object(value(item, "row_bounds", "rowBounds"));
+  return {
+    planType: "universal",
+    schemaVersion: text(value(item, "schema_version", "schemaVersion"), "universal-v1"),
+    transactionDate: Object.keys(date).length ? { sourceColumn: text(value(date, "source_column", "sourceColumn")), format: text(date.format) } : null,
+    transactionTimestamp: Object.keys(timestamp).length ? { sourceColumn: text(value(timestamp, "source_column", "sourceColumn")), format: text(timestamp.format), timezone: text(timestamp.timezone, "UTC") } : null,
+    description: { sourceColumn: text(value(description, "source_column", "sourceColumn")), strip: bool(description.strip, true), collapseWhitespace: bool(value(description, "collapse_whitespace", "collapseWhitespace"), true) },
+    amount: amountMapping,
+    currency: currencyMapping,
+    sourceNativeId: optionalSource(value(item, "source_native_id", "sourceNativeId")),
+    categoryHint: optionalSource(value(item, "category_hint", "categoryHint")),
+    subcategoryHint: optionalSource(value(item, "subcategory_hint", "subcategoryHint")),
+    rowBounds: { firstRow: nullableNumber(value(rowBounds, "first_row", "firstRow")), lastRow: nullableNumber(value(rowBounds, "last_row", "lastRow")) },
+    exactFilters: array(value(item, "exact_filters", "exactFilters")).map((entry) => { const filter = object(entry); return { sourceColumn: text(value(filter, "source_column", "sourceColumn")), mode: text(filter.mode, "include") as "include" | "exclude", values: array(filter.values).map((entry) => text(entry)) }; }),
+    skipEmptyRows: bool(value(item, "skip_empty_rows", "skipEmptyRows"), true),
+    skipRepeatedHeaders: bool(value(item, "skip_repeated_headers", "skipRepeatedHeaders"), true),
+    footerRule: (() => { const footer = object(value(item, "footer_rule", "footerRule")); return Object.keys(footer).length ? { sourceColumn: text(value(footer, "source_column", "sourceColumn")), normalizedValue: text(value(footer, "normalized_value", "normalizedValue")) } : null; })(),
+  };
+};
+
+export const mapMappingProposal = (input: unknown): MappingProposal | null => {
+  const item = object(input);
+  if (!Object.keys(item).length) return null;
+  const planInput = value(item, "plan", "execution_plan", "executionPlan", "mapping");
+  if (!Object.keys(object(planInput)).length) return null;
+  return {
+    origin: text(item.origin, "MANUAL") as MappingOrigin,
+    label: text(value(item, "label", "name", "template_name"), "Manual mapping"),
+    plan: mapImportExecutionPlan(planInput),
+    templateId: nullableText(value(item, "template_id", "templateId")),
+    templateVersionId: nullableText(value(item, "template_version_id", "templateVersionId")),
+    scope: nullableText(item.scope) as MappingProposal["scope"],
+  };
+};
+
 export const mapHealth = (input: unknown): Health => ({ status: text(object(input).status, "unknown") });
 
-export const mapSourceAccount = (input: unknown): SourceAccount => {
+export const mapAccount = (input: unknown): Account => {
   const item = object(input);
   return {
     id: text(item.id),
-    provider: text(item.provider, "Manual"),
-    displayName: text(value(item, "display_name", "displayName", "name"), "Unnamed account"),
+    name: text(item.name, "Unnamed account"),
     defaultCurrency: text(value(item, "default_currency", "defaultCurrency", "currency"), ""),
     active: bool(value(item, "is_active", "active"), true),
   };
 };
 
-export const mapSourceAccounts = (input: unknown): SourceAccount[] => records(input).map(mapSourceAccount);
+export const mapAccounts = (input: unknown): Account[] => records(input).map(mapAccount);
 
 export const mapImportBatch = (input: unknown): ImportBatch => {
   const item = object(input);
   const counts = object(item.counts);
   return {
     id: text(item.id),
-    sourceAccountId: text(value(item, "source_account_id", "sourceAccountId", "account_id")),
+    accountId: text(value(item, "account_id", "accountId")),
     filename: text(value(item, "filename", "original_filename"), "Manual entry"),
     status: text(item.status, "UPLOADED") as ImportStatus,
     totalRows: number(value(item, "total_rows", "totalRows") ?? counts.total),
     validRows: number(value(item, "valid_rows", "validRows") ?? counts.valid),
     needsReviewRows: number(value(item, "needs_review_rows", "needsReviewRows") ?? counts.needs_review),
     duplicateRows: number(value(item, "duplicate_rows", "duplicateRows") ?? counts.duplicates),
+    includedRows: number(value(item, "included_rows", "includedRows") ?? counts.included),
     ignoredRows: number(value(item, "ignored_rows", "ignoredRows") ?? counts.ignored),
+    auditRows: number(value(item, "audit_rows", "auditRows") ?? counts.audit),
+    blockedRows: number(value(item, "blocked_rows", "blockedRows") ?? counts.blocked),
     errors: array(item.errors).map((entry) => text(object(entry).message ?? entry)).filter(Boolean),
+    revision: number(item.revision, 1),
+    mappingRevision: number(value(item, "mapping_revision", "mappingRevision")),
+    currentMappingOrigin: nullableText(value(item, "current_mapping_origin", "currentMappingOrigin")) as MappingOrigin | null,
+    currentMapping: (() => { const candidate = value(item, "current_execution_plan", "currentExecutionPlan"); return Object.keys(object(candidate)).length ? mapImportExecutionPlan(candidate) : null; })(),
+    currentTemplateId: nullableText(value(item, "source_mapping_template_id", "current_template_id", "currentTemplateId")),
+    currentTemplateVersionId: nullableText(value(item, "source_mapping_template_version_id", "current_template_version_id", "currentTemplateVersionId")),
+    mappingDiagnostics: array(value(item, "current_mapping_diagnostics", "mapping_diagnostics", "mappingDiagnostics")).map(mapDiagnostic),
     createdAt: text(value(item, "created_at", "createdAt")),
     updatedAt: text(value(item, "updated_at", "updatedAt")),
   };
 };
+
+export const mapImportInspection = (input: unknown): ImportInspection => {
+  const root = object(input);
+  const item = nested(input, "inspection", "data");
+  return {
+    batchRevision: number(value(root, "revision", "batch_revision", "batchRevision")),
+    inspectionVersion: text(value(item, "inspection_version", "inspectionVersion"), "inspection-v1"),
+    executionSchemaVersion: text(value(item, "execution_schema_version", "executionSchemaVersion"), "universal-v1"),
+    fileType: text(value(item, "file_type", "fileType"), "CSV") as ImportInspection["fileType"],
+    encoding: nullableText(item.encoding), delimiter: nullableText(item.delimiter), quoteCharacter: nullableText(value(item, "quote_character", "quoteCharacter")),
+    sheets: array(item.sheets).map((entry) => { const sheet = object(entry); return { name: text(sheet.name), index: number(sheet.index), rowCount: number(value(sheet, "row_count", "rowCount")), columnCount: number(value(sheet, "column_count", "columnCount")), candidateHeaderRows: array(value(sheet, "candidate_header_rows", "candidateHeaderRows")).map((entry) => number(entry)) }; }),
+    selectedSheet: text(value(item, "selected_sheet", "selectedSheet")),
+    headerRow: number(value(item, "header_row", "headerRow"), 1), dataStartRow: number(value(item, "data_start_row", "dataStartRow"), 2), dataEndRow: number(value(item, "data_end_row", "dataEndRow")), rowCount: number(value(item, "row_count", "rowCount")),
+    blankRows: array(value(item, "blank_rows", "blankRows")).map((entry) => number(entry)), repeatedHeaderRows: array(value(item, "repeated_header_rows", "repeatedHeaderRows")).map((entry) => number(entry)), possibleFooterRows: array(value(item, "possible_footer_rows", "possibleFooterRows")).map((entry) => number(entry)),
+    columns: array(item.columns).map((entry) => { const column = object(entry); return { id: text(column.id), position: number(column.position), rawLabel: text(value(column, "raw_label", "rawLabel", "label")), normalizedLabel: text(value(column, "normalized_label", "normalizedLabel")), inferredType: text(value(column, "inferred_type", "inferredType"), "MIXED") as ImportInspection["columns"][number]["inferredType"] }; }),
+    previewOffset: number(value(item, "preview_offset", "previewOffset")), preview: array(value(item, "preview", "rows")).map((entry) => { const row = object(entry); return { rowNumber: number(value(row, "row_number", "rowNumber")), values: object(value(row, "values", "raw", "cells")) }; }),
+    structuralSignature: text(value(item, "structural_signature", "structuralSignature")),
+    diagnostics: array(value(root, "diagnostics", "inspection_diagnostics") ?? item.diagnostics).map(mapDiagnostic),
+    proposals: (() => {
+      const proposals = object(root.proposals);
+      const templates = array(proposals.templates).map((entry) => {
+        const proposal = object(entry);
+        return mapMappingProposal({ ...proposal, origin: value(proposal, "origin"), label: value(proposal, "name"), plan: value(proposal, "execution_plan") });
+      }).filter((entry): entry is MappingProposal => entry !== null);
+      const universal = object(proposals.universal);
+      return {
+        templates,
+        universal: Object.keys(universal).length ? mapImportExecutionPlan(universal) : null,
+      };
+    })(),
+  };
+};
+
+export const mapMappingPreview = (input: unknown): MappingPreview => {
+  const item = nested(input, "preview", "data");
+  const rows = array(item.rows).map((entry) => { const row = object(entry); return { rowNumber: number(row.row_number), raw: object(row.raw), transactionDate: nullableText(row.transaction_date), transactionTimestamp: nullableText(row.transaction_at), description: nullableText(row.description), amountMinor: nullableNumber(row.amount_minor), currency: nullableText(row.currency), disposition: text(row.disposition) as RowDisposition, errors: array(row.issues).map((issue) => text(object(issue).message ?? issue)).filter(Boolean) }; });
+  return { totalRows: number(item.total_rows), rows, importableRows: number(item.importable_rows), errorRows: number(item.error_rows), auditRows: number(item.audit_rows) };
+};
+
+export const mapMappingConfirmation = (input: unknown): MappingConfirmation => {
+  const item = object(input);
+  return { batchId: text(value(item, "batch_id", "batchId", "id")), revision: number(item.revision), mappingRevision: number(value(item, "mapping_revision", "mappingRevision")), plan: mapImportExecutionPlan(value(item, "execution_plan", "executionPlan", "plan")) };
+};
+
+export const mapMappingSuggestionPayload = (input: unknown): MappingSuggestionPayload => {
+  const item = nested(input, "data");
+  return { payload: object(value(item, "payload", "redacted_payload", "redactedPayload")), digest: text(value(item, "sha256", "digest", "payload_sha256", "payloadDigest")), revision: number(value(item, "revision", "batch_revision", "batchRevision")) };
+};
+
+export const mapMappingSuggestion = (input: unknown): MappingSuggestion => {
+  const item = object(input);
+  const result = object(item.result);
+  const error = object(result.error);
+  const status = text(result.status) as MappingSuggestion["status"];
+  return {
+    revision: number(item.revision),
+    status,
+    plan: status === "suggested" ? mapImportExecutionPlan(result.plan) : null,
+    fallback: status === "manual_fallback" ? { code: text(error.code), message: text(error.message), retryable: bool(error.retryable) } : null,
+  };
+};
+
+export const mapImportMappingTemplate = (input: unknown): ImportMappingTemplate => {
+  const item = object(input);
+  const currentVersion = object(value(item, "current_version", "currentVersion"));
+  const mapVersion = (input: unknown) => { const version = object(input); return { id: text(version.id), version: number(version.version), plan: mapImportExecutionPlan(version.execution_plan), createdAt: text(version.created_at) }; };
+  return { id: text(item.id), name: text(item.name), structuralSignature: text(item.structural_signature), accountId: nullableText(item.account_id), origin: text(item.origin, "MANUAL") as MappingOrigin, active: bool(item.is_active), revision: number(item.revision), currentVersion: mapVersion(currentVersion), versions: array(item.versions).map(mapVersion), createdAt: text(item.created_at), updatedAt: text(item.updated_at) };
+};
+
+export const mapImportMappingTemplates = (input: unknown): ImportMappingTemplate[] => records(input).map(mapImportMappingTemplate);
 
 export const mapImportBatches = (input: unknown): ImportBatch[] => records(input).map(mapImportBatch);
 
@@ -212,8 +399,7 @@ export const mapTagRule = (input: unknown): TagRule => {
     id: text(item.id),
     match: text(value(item, "match", "normalized_description", "description")),
     scope: text(item.scope, "GLOBAL"),
-    provider: nullableText(item.provider),
-    sourceAccountId: nullableText(value(item, "source_account_id", "sourceAccountId")),
+    accountId: nullableText(value(item, "account_id", "accountId")),
     categoryId: text(value(item, "category_id", "categoryId")),
     subcategoryId: nullableText(value(item, "subcategory_id", "subcategoryId")),
     active: bool(value(item, "is_enabled", "active"), true),
@@ -233,7 +419,7 @@ export const mapCurrencies = (input: unknown): string[] => {
 
 export const mapTransaction = (input: unknown): Transaction => {
   const item = object(input);
-  const account = object(value(item, "source_account", "account"));
+  const account = object(item.account);
   const category = object(item.category);
   const subcategory = object(item.subcategory);
   return {
@@ -244,13 +430,12 @@ export const mapTransaction = (input: unknown): Transaction => {
     amountMinor: number(value(item, "amount_minor", "amountMinor")),
     currency: text(item.currency),
     kind: text(item.kind, "EXPENSE") as TransactionKind,
-    sourceAccountId: text(value(item, "source_account_id", "sourceAccountId") ?? account.id),
-    sourceAccountName: text(value(item, "source_account_name", "sourceAccountName") ?? account.display_name ?? account.name),
+    accountId: text(value(item, "account_id", "accountId") ?? account.id),
+    accountName: text(value(item, "account_name", "accountName") ?? account.name),
     categoryId: nullableText(value(item, "category_id", "categoryId") ?? category.id),
     categoryName: nullableText(value(item, "category_name", "categoryName") ?? category.display_name ?? category.name),
     subcategoryId: nullableText(value(item, "subcategory_id", "subcategoryId") ?? subcategory.id),
     subcategoryName: nullableText(value(item, "subcategory_name", "subcategoryName") ?? subcategory.display_name ?? subcategory.name),
-    excluded: bool(value(item, "is_excluded", "excluded")),
     importBatchId: nullableText(value(item, "import_batch_id", "importBatchId")),
   };
 };
@@ -395,8 +580,8 @@ const mapDashboardRecent = (input: unknown): DashboardRecentTransaction => {
     categoryName: nullableText(value(item, "category_name", "categoryName")),
     subcategoryId: nullableText(value(item, "subcategory_id", "subcategoryId")),
     subcategoryName: nullableText(value(item, "subcategory_name", "subcategoryName")),
-    sourceAccountId: text(value(item, "source_account_id", "sourceAccountId")),
-    sourceAccountName: text(value(item, "source_account_name", "sourceAccountName")),
+    accountId: text(value(item, "account_id", "accountId")),
+    accountName: text(value(item, "account_name", "accountName")),
   };
 };
 

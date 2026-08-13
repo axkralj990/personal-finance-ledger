@@ -7,7 +7,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import joinedload
 
 from backend.app.api.dependencies import SessionDependency
-from backend.app.database.models import Category, SourceAccount, Transaction, TransactionKind
+from backend.app.database.models import Account, Category, Transaction, TransactionKind
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -36,8 +36,8 @@ class RecentTransactionRead(BaseModel):
     amount_minor: int
     currency: str
     kind: TransactionKind
-    source_account_id: str
-    source_account_name: str
+    account_id: str
+    account_name: str
     category_id: str | None
     category_name: str | None
     subcategory_id: str | None
@@ -135,11 +135,11 @@ def report_accounts(
     date_to: date | None = None,
 ) -> ReportPointsRead:
     rows = session.execute(
-        select(SourceAccount.display_name, func.sum(Transaction.amount_minor))
-        .join(Transaction, Transaction.source_account_id == SourceAccount.id)
+        select(Account.name, func.sum(Transaction.amount_minor))
+        .join(Transaction, Transaction.account_id == Account.id)
         .where(*_conditions(currency, date_from, date_to))
-        .group_by(SourceAccount.id, SourceAccount.display_name)
-        .order_by(SourceAccount.display_name)
+        .group_by(Account.id, Account.name)
+        .order_by(Account.name)
     )
     return ReportPointsRead(
         currency=currency.upper(),
@@ -197,8 +197,8 @@ def report_recent(
                 amount_minor=item.amount_minor,
                 currency=item.currency,
                 kind=item.kind,
-                source_account_id=item.source_account_id,
-                source_account_name=item.account.display_name,
+                account_id=item.account_id,
+                account_name=item.account.name,
                 category_id=item.category_id,
                 category_name=item.category.display_name if item.category else None,
                 subcategory_id=item.subcategory_id,

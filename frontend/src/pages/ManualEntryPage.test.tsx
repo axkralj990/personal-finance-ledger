@@ -7,7 +7,7 @@ import ManualEntryPage from "./ManualEntryPage";
 
 describe("ManualEntryPage taxonomy", () => {
   it("validates signed amounts without special handling", () => {
-    const base = { id: "row", sourceAccountId: "a", date: "2026-08-09", description: "Pay", amount: "10.00", currency: "SGD", categoryId: "", subcategoryId: "" };
+    const base = { id: "row", accountId: "a", date: "2026-08-09", description: "Pay", amount: "10.00", currency: "SGD", categoryId: "", subcategoryId: "" };
     expect(manualRowError(base)).toBeNull();
     expect(manualRowError({ ...base, amount: "-10.001" })).toMatch(/at most two decimal places/);
     expect(manualRowError({ ...base, amount: "-10.00" })).toBeNull();
@@ -16,7 +16,7 @@ describe("ManualEntryPage taxonomy", () => {
 
   it("changes the available subcategories with the parent category", async () => {
     const user = userEvent.setup();
-    vi.spyOn(api.sourceAccounts, "list").mockResolvedValue([{ id: "a", provider: "Manual", displayName: "Cash", defaultCurrency: "SGD", active: true }]);
+    vi.spyOn(api.accounts, "list").mockResolvedValue([{ id: "a", name: "Cash", defaultCurrency: "SGD", active: true }]);
     vi.spyOn(api.taxonomy, "categories").mockResolvedValue([
       { id: "food", name: "Food", sortOrder: 1, active: true, subcategories: [{ id: "cafes", categoryId: "food", name: "Cafes", sortOrder: 1, active: true }] },
       { id: "home", name: "Home", sortOrder: 2, active: true, subcategories: [{ id: "rent", categoryId: "home", name: "Rent", sortOrder: 1, active: true }] },
@@ -37,7 +37,7 @@ describe("ManualEntryPage taxonomy", () => {
   it("renders the bulk date editor without an unregistered-module error", async () => {
     const user = userEvent.setup();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.spyOn(api.sourceAccounts, "list").mockResolvedValue([{ id: "a", provider: "Manual", displayName: "Cash", defaultCurrency: "SGD", active: true }]);
+    vi.spyOn(api.accounts, "list").mockResolvedValue([{ id: "a", name: "Cash", defaultCurrency: "SGD", active: true }]);
     vi.spyOn(api.taxonomy, "categories").mockResolvedValue([]);
 
     render(<MemoryRouter><ManualEntryPage /></MemoryRouter>);

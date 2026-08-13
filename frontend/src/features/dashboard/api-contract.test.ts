@@ -13,7 +13,7 @@ describe("dashboard API contract", () => {
     expect(dashboard.series.rollingMean.month[0]).toMatchObject({ incomeMeanMinor: 100000, windowMonths: 1 });
     expect(dashboard.composition.categoryRanked[0]).toMatchObject({ taxonomyId: "food", amountMinor: 110000 });
     expect(dashboard.annual[0]?.months).toHaveLength(12);
-    expect(dashboard.recent[0]).toMatchObject({ sourceAccountName: "Main EUR", kind: "EXPENSE" });
+    expect(dashboard.recent[0]).toMatchObject({ accountName: "Main EUR", kind: "EXPENSE" });
     expect(dashboard.quality.categoryOnlyCount).toBe(2);
   });
 

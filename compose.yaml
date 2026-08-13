@@ -7,7 +7,7 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "${FINANCE_HOST_PORT:-8000}:8000"
+      - "${FINANCE_HOST_PORT:?FINANCE_HOST_PORT is required}:8000"
     environment:
       DATA_DIR: /data
       DATABASE_URL: ""
@@ -17,10 +17,21 @@ services:
       YAHOO_FINANCE_BASE_URL: "${YAHOO_FINANCE_BASE_URL:-https://query1.finance.yahoo.com}"
       MARKET_DATA_TIMEOUT_SECONDS: "${MARKET_DATA_TIMEOUT_SECONDS:-10}"
       QUOTE_PREVIEW_MAX_AGE_HOURS: "${QUOTE_PREVIEW_MAX_AGE_HOURS:-24}"
+      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}"
+      OPENAI_MAPPING_ENABLED: "${OPENAI_MAPPING_ENABLED:-false}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MAPPING_MODEL: "${OPENAI_MAPPING_MODEL:-gpt-4.1-mini}"
+      OPENAI_MAPPING_CONNECT_TIMEOUT_SECONDS: "${OPENAI_MAPPING_CONNECT_TIMEOUT_SECONDS:-5}"
+      OPENAI_MAPPING_READ_TIMEOUT_SECONDS: "${OPENAI_MAPPING_READ_TIMEOUT_SECONDS:-20}"
+      OPENAI_MAPPING_OVERALL_TIMEOUT_SECONDS: "${OPENAI_MAPPING_OVERALL_TIMEOUT_SECONDS:-30}"
+      OPENAI_MAPPING_MAX_RETRIES: "${OPENAI_MAPPING_MAX_RETRIES:-1}"
+      OPENAI_MAPPING_MAX_CONCURRENT: "${OPENAI_MAPPING_MAX_CONCURRENT:-1}"
+      OPENAI_MAPPING_REQUESTS_PER_HOUR: "${OPENAI_MAPPING_REQUESTS_PER_HOUR:-10}"
       TIMEZONE: "${TIMEZONE:-Europe/Ljubljana}"
       TZ: "${TIMEZONE:-Europe/Ljubljana}"
     volumes:
-      - "${FINANCE_DATA_PATH:-./data/runtime}:/data"
+      - "${FINANCE_DATA_PATH:?FINANCE_DATA_PATH is required and must be absolute}:/data"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
       interval: 30s

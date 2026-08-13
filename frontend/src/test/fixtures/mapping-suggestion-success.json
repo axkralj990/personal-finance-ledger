@@ -1,0 +1,55 @@
+{
+  "batch_id": "batch-1",
+  "revision": 4,
+  "result": {
+    "status": "suggested",
+    "plan": {
+      "plan_type": "universal",
+      "schema_version": "universal-v1",
+      "transaction_date": {
+        "source_column": "c000",
+        "format": "%Y-%m-%d"
+      },
+      "transaction_timestamp": null,
+      "description": {
+        "source_column": "c001",
+        "strip": true,
+        "collapse_whitespace": true
+      },
+      "amount": {
+        "kind": "signed",
+        "source_column": "c002",
+        "number_format": {
+          "decimal_separator": ".",
+          "thousands_separator": null,
+          "strip_currency_symbols": true,
+          "allow_parentheses": false,
+          "allow_trailing_minus": false
+        },
+        "expense_sign_convention": "EXPENSES_NEGATIVE"
+      },
+      "currency": { "kind": "source", "source_column": "c003" },
+      "source_native_id": null,
+      "category_hint": null,
+      "subcategory_hint": null,
+      "row_bounds": { "first_row": null, "last_row": null },
+      "exact_filters": [],
+      "skip_empty_rows": true,
+      "skip_repeated_headers": true,
+      "footer_rule": null
+    },
+    "audit": {
+      "provider": "openai",
+      "model": "gpt-test",
+      "request_id": "request-1",
+      "prompt_version": "universal-import-mapping-v1",
+      "schema_version": "universal-v1",
+      "payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "consented_at": "2026-08-12T10:00:00Z",
+      "requested_at": "2026-08-12T10:00:00Z",
+      "duration_ms": 10,
+      "outcome": "suggested",
+      "error_code": null
+    }
+  }
+}

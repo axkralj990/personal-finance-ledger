@@ -1,0 +1,7 @@
+{
+  "total_rows": 32,
+  "importable_rows": 29,
+  "error_rows": 2,
+  "audit_rows": 1,
+  "rows": [{"row_number": 27, "raw": {"c000": "bad-date", "c001": "Late row"}, "transaction_date": null, "transaction_at": null, "description": "Late row", "amount_minor": -450, "currency": "EUR", "disposition": "PENDING", "issues": [{"code": "parse_error", "message": "Date could not be parsed", "field": "transaction_date"}]}]
+}

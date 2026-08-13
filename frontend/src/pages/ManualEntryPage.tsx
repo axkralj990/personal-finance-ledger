@@ -14,11 +14,11 @@ import { ledgerGridTheme } from "../shared/grid-theme";
 import { subcategoriesFor, taxonomyError } from "../shared/taxonomy";
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `manual-${Date.now()}-${Math.random()}`;
-const newRow = (): ManualRow => ({ id: createId(), sourceAccountId: "", date: localCalendarDate(), description: "", amount: "", currency: "", categoryId: "", subcategoryId: "" });
+const newRow = (): ManualRow => ({ id: createId(), accountId: "", date: localCalendarDate(), description: "", amount: "", currency: "", categoryId: "", subcategoryId: "" });
 
 export default function ManualEntryPage() {
   const navigate = useNavigate();
-  const accounts = useResource(() => api.sourceAccounts.list(), "manual-accounts");
+  const accounts = useResource(() => api.accounts.list(), "manual-accounts");
   const categories = useResource(() => api.taxonomy.categories(), "manual-categories");
   const [tab, setTab] = useState<"quick" | "bulk">("quick");
   const [quick, setQuick] = useState(newRow);
@@ -31,12 +31,8 @@ export default function ManualEntryPage() {
   const isMobile = useMediaQuery("(max-width: 700px)");
   const taxonomy = categories.data ?? [];
   const activeAccounts = accounts.data?.filter((item) => item.active) ?? [];
-  const manualAccount = activeAccounts.find((item) => item.provider.toUpperCase() === "MANUAL");
-  const withAccountDefault = (row: ManualRow): ManualRow => row.sourceAccountId || !manualAccount
-    ? row
-    : { ...row, sourceAccountId: manualAccount.id, currency: row.currency || manualAccount.defaultCurrency };
-  const quickWithDefault = withAccountDefault(quick);
-  const rowsWithDefaults = rows.map(withAccountDefault);
+  const quickWithDefault = quick;
+  const rowsWithDefaults = rows;
   const quickTaxonomyError = taxonomyError(taxonomy, quick.categoryId || null, quick.subcategoryId || null);
   const mobilePageCount = Math.max(1, Math.ceil(rowsWithDefaults.length / 10));
   const activeMobilePage = Math.min(mobilePage, mobilePageCount);
@@ -57,7 +53,7 @@ export default function ManualEntryPage() {
       const batch = await api.manualImports.create([input]);
       if (addAnother) {
         setSavedDraft({ id: batch.id, description: quick.description });
-        setQuick({ ...newRow(), sourceAccountId: quickWithDefault.sourceAccountId, currency: quickWithDefault.currency });
+        setQuick({ ...newRow(), accountId: quickWithDefault.accountId, currency: quickWithDefault.currency });
       } else {
         navigate(`/imports/${batch.id}`);
       }
@@ -74,7 +70,7 @@ export default function ManualEntryPage() {
     const inputs = populated.map(toManualInput);
     const invalidRow = populated.find((row) => manualRowError(row));
     const invalidTaxonomy = populated.find((row) => taxonomyError(taxonomy, row.categoryId || null, row.subcategoryId || null));
-    const accountIds = new Set(populated.map((row) => row.sourceAccountId));
+    const accountIds = new Set(populated.map((row) => row.accountId));
     if (!populated.length || inputs.some((item) => !item) || invalidTaxonomy || accountIds.size !== 1) {
       setError(invalidTaxonomy
         ? "One row has a subcategory outside its selected parent category."
@@ -102,7 +98,7 @@ export default function ManualEntryPage() {
     { field: "description", headerName: "Description", editable: true, flex: 1, minWidth: 210 },
     { field: "amount", headerName: "Amount", editable: true, width: 120, cellClass: "num" },
     { field: "currency", headerName: "Currency", editable: true, width: 105 },
-    { field: "sourceAccountId", headerName: "Account", editable: true, cellEditor: "agSelectCellEditor", cellEditorParams: { values: activeAccounts.map((item) => item.id) }, valueFormatter: ({ value }) => activeAccounts.find((item) => item.id === value)?.displayName ?? "Choose", minWidth: 150 },
+    { field: "accountId", headerName: "Account", editable: true, cellEditor: "agSelectCellEditor", cellEditorParams: { values: activeAccounts.map((item) => item.id) }, valueFormatter: ({ value }) => activeAccounts.find((item) => item.id === value)?.name ?? "Choose", minWidth: 150 },
     { field: "categoryId", headerName: "Category", editable: true, cellEditor: "agSelectCellEditor", cellEditorParams: { values: ["", ...taxonomy.filter((item) => item.active).map((item) => item.id)] }, valueFormatter: ({ value }) => categoryNames.get(String(value)) ?? "None", minWidth: 135 },
     { field: "subcategoryId", headerName: "Subcategory", editable: ({ data }) => Boolean(data?.categoryId), cellEditor: "agSelectCellEditor", cellEditorParams: ({ data }: { data: ManualRow }) => ({ values: ["", ...subcategoriesFor(taxonomy, data.categoryId || null).map((item) => item.id)] }), valueFormatter: ({ value }) => subcategoryNames.get(String(value)) ?? "None", minWidth: 145 },
   ];
@@ -111,8 +107,8 @@ export default function ManualEntryPage() {
     if (!event.data) return;
     const updated = { ...event.data };
     if (event.colDef.field === "categoryId") updated.subcategoryId = "";
-    if (event.colDef.field === "sourceAccountId" && !updated.currency) {
-      updated.currency = activeAccounts.find((item) => item.id === updated.sourceAccountId)?.defaultCurrency ?? "";
+    if (event.colDef.field === "accountId" && !updated.currency) {
+      updated.currency = activeAccounts.find((item) => item.id === updated.accountId)?.defaultCurrency ?? "";
     }
     setRows((current) => current.map((row) => row.id === updated.id ? updated : row));
   }
@@ -143,7 +139,7 @@ export default function ManualEntryPage() {
         <section id="quick-panel" className="ledger-panel panel-padding">
           <div className="section-heading"><h2>One transaction</h2><p>Saved through manual import review</p></div>
           <div className="form-grid">
-            <Field label="Account" htmlFor="quick-account"><select id="quick-account" value={quickWithDefault.sourceAccountId} onChange={(event) => { const account = activeAccounts.find((item) => item.id === event.target.value); setQuick((current) => ({ ...current, sourceAccountId: event.target.value, currency: current.currency || account?.defaultCurrency || "" })); }}><option value="">Choose account</option>{activeAccounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></Field>
+            <Field label="Account" htmlFor="quick-account"><select id="quick-account" value={quickWithDefault.accountId} onChange={(event) => { const account = activeAccounts.find((item) => item.id === event.target.value); setQuick((current) => ({ ...current, accountId: event.target.value, currency: current.currency || account?.defaultCurrency || "" })); }}><option value="">Choose account</option>{activeAccounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
             <Field label="Date" htmlFor="quick-date"><input id="quick-date" type="date" value={quick.date} onChange={(event) => updateQuick("date", event.target.value)} /></Field>
             <Field label="Description" htmlFor="quick-description"><input id="quick-description" value={quick.description} onChange={(event) => updateQuick("description", event.target.value)} placeholder="Merchant or note" /></Field>
             <Field label="Amount" htmlFor="quick-amount" hint="Enter the signed major-unit amount"><input id="quick-amount" inputMode="decimal" value={quick.amount} onChange={(event) => updateQuick("amount", event.target.value)} placeholder="-24.90" /></Field>
@@ -163,7 +159,7 @@ export default function ManualEntryPage() {
                <article className="record-card" key={row.id}>
                  <h3>Row {(activeMobilePage - 1) * 10 + pageIndex + 1}</h3>
                  <div className="form-grid">
-                   <Field label="Account" htmlFor={`mobile-account-${row.id}`}><select id={`mobile-account-${row.id}`} value={row.sourceAccountId} onChange={(event) => { const account = activeAccounts.find((item) => item.id === event.target.value); updateMobileRow(row.id, { sourceAccountId: event.target.value, currency: row.currency || account?.defaultCurrency || "" }); }}><option value="">Choose account</option>{activeAccounts.map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></Field>
+                    <Field label="Account" htmlFor={`mobile-account-${row.id}`}><select id={`mobile-account-${row.id}`} value={row.accountId} onChange={(event) => { const account = activeAccounts.find((item) => item.id === event.target.value); updateMobileRow(row.id, { accountId: event.target.value, currency: row.currency || account?.defaultCurrency || "" }); }}><option value="">Choose account</option>{activeAccounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
                    <Field label="Description" htmlFor={`mobile-desc-${row.id}`}><input id={`mobile-desc-${row.id}`} value={row.description} onChange={(event) => updateMobileRow(row.id, { description: event.target.value })} /></Field>
                    <Field label="Amount" htmlFor={`mobile-amount-${row.id}`}><input id={`mobile-amount-${row.id}`} inputMode="decimal" value={row.amount} onChange={(event) => updateMobileRow(row.id, { amount: event.target.value })} /></Field>
                    <Field label="Date" htmlFor={`mobile-date-${row.id}`}><input id={`mobile-date-${row.id}`} type="date" value={row.date} onChange={(event) => updateMobileRow(row.id, { date: event.target.value })} /></Field>

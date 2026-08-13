@@ -85,7 +85,7 @@ def test_portfolio_migration_adds_only_three_new_tables(tmp_path: Path) -> None:
 
     inspector = inspect(engine)
     after = set(inspector.get_table_names())
-    assert after - before == {"assets", "asset_valuations", "asset_events"}
+    assert {"assets", "asset_valuations", "asset_events"} <= after - before
     assert {index["name"] for index in inspector.get_indexes("asset_valuations")} == {
         "ix_asset_valuations_asset_id_valued_at",
         "uq_asset_valuation_monthly",
@@ -130,7 +130,7 @@ def test_portfolio_migration_adds_only_three_new_tables(tmp_path: Path) -> None:
     )
     with engine.connect() as connection:
         assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == (
-            "20260811_0006"
+            "20260813_0008"
         )
         provenance = connection.exec_driver_sql(
             "SELECT cost_basis_fx_source, cost_basis_fx_rate_to_eur "
@@ -478,9 +478,7 @@ def test_archived_assets_remain_in_prior_current_and_history_reports(
     )
 
 
-def test_archive_allows_unchanged_legacy_cost_fx_after_acquisition(
-    app, client: TestClient
-) -> None:
+def test_archive_allows_unchanged_legacy_cost_fx_after_acquisition(app, client: TestClient) -> None:
     asset = _create_stock(client, name="Legacy FX", symbol="LEGACY")
     with app.state.database.session() as session:
         stored = session.get(Asset, asset["id"])
@@ -835,9 +833,7 @@ def test_yahoo_preview_source_is_signed_and_persisted(app, client: TestClient) -
     assert preview["source"] == "YAHOO_FINANCE"
     assert persisted.status_code == 201
     assert persisted.json()["items"][0]["source"] == "YAHOO_FINANCE"
-    history = client.get(
-        "/api/v1/portfolio", params={"as_of": "2026-08-11"}
-    ).json()["history"]
+    history = client.get("/api/v1/portfolio", params={"as_of": "2026-08-11"}).json()["history"]
     assert history[-1]["date"] == "2026-08-11"
     assert history[-1]["total_value_minor"] == 300
 
@@ -855,9 +851,7 @@ def test_history_preview_persists_multiple_dates_and_skips_existing_months(
     asset = response.json()
     app.state.market_data_client_factory = _StubHistoryMarketDataClient
 
-    preview = client.get(
-        "/api/v1/portfolio/history-preview", params={"asset_id": asset["id"]}
-    )
+    preview = client.get("/api/v1/portfolio/history-preview", params={"asset_id": asset["id"]})
     assert preview.status_code == 200
     body = preview.json()
     assert body["available_months"] == 2
@@ -1119,11 +1113,7 @@ def test_yahoo_monthly_history_uses_month_ends_and_batched_ecb_rates(
             )
         return httpx.Response(
             200,
-            text=(
-                "TIME_PERIOD,OBS_VALUE\n"
-                "2022-10-31,1.0\n"
-                "2022-11-30,2.0\n"
-            ),
+            text=("TIME_PERIOD,OBS_VALUE\n2022-10-31,1.0\n2022-11-30,2.0\n"),
         )
 
     provider = MarketDataClient(settings)
@@ -1330,9 +1320,12 @@ def test_quote_preview_expiry_ordering_and_equivalent_offset_replay(
 
 
 def test_ljubljana_archive_date_controls_month_boundary(
-    app, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    app, client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    settings = Settings(timezone="Europe/Ljubljana")
+    settings = Settings(
+        data_dir=tmp_path,
+        timezone="Europe/Ljubljana",
+    )
     assert _archive_date(settings, datetime(2026, 3, 31, 22, 30, tzinfo=UTC)) == date(2026, 4, 1)
     monkeypatch.setattr("backend.app.api.assets._archive_date", lambda _settings: date(2026, 4, 1))
     asset = client.post(

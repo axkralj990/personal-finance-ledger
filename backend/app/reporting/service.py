@@ -12,8 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.database.models import (
+    Account,
     Category,
-    SourceAccount,
     Subcategory,
     Transaction,
     TransactionKind,
@@ -55,7 +55,7 @@ class _TransactionRow:
     category_id: str | None
     subcategory_id: str | None
     description: str
-    source_account_id: str
+    account_id: str
 
 
 @dataclass(slots=True)
@@ -93,9 +93,7 @@ def build_dashboard(session: Session, filters: DashboardFilters) -> DashboardRep
         rolling_from = _rolling_window_start(filters.date_from, "year")
         rows = _load_transactions(session, filters, min(prior_from, rolling_from))
         current_rows = [row for row in rows if row.transaction_date >= filters.date_from]
-        prior_rows = [
-            row for row in rows if prior_from <= row.transaction_date <= prior_to
-        ]
+        prior_rows = [row for row in rows if prior_from <= row.transaction_date <= prior_to]
         category_names, subcategory_names, account_names = _load_names(session, current_rows)
 
     current_totals = _sum_rows(current_rows)
@@ -256,7 +254,7 @@ def _load_transactions(
             Transaction.category_id,
             Transaction.subcategory_id,
             Transaction.description,
-            Transaction.source_account_id,
+            Transaction.account_id,
         )
         .where(*conditions)
         .order_by(Transaction.transaction_date, Transaction.id)
@@ -269,7 +267,7 @@ def _load_names(
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     category_ids = {row.category_id for row in rows if row.category_id is not None}
     subcategory_ids = {row.subcategory_id for row in rows if row.subcategory_id is not None}
-    account_ids = {row.source_account_id for row in rows}
+    account_ids = {row.account_id for row in rows}
     category_names = dict(
         session.execute(
             select(Category.id, Category.display_name).where(Category.id.in_(category_ids))
@@ -283,11 +281,7 @@ def _load_names(
         ).all()
     )
     account_names = dict(
-        session.execute(
-            select(SourceAccount.id, SourceAccount.display_name).where(
-                SourceAccount.id.in_(account_ids)
-            )
-        ).all()
+        session.execute(select(Account.id, Account.name).where(Account.id.in_(account_ids))).all()
     )
     return category_names, subcategory_names, account_names
 
@@ -366,9 +360,7 @@ def _build_rolling_mean(
     current = filters.date_from
     while current <= filters.date_to:
         window_start = _rolling_window_start(current, window)
-        window_rows = [
-            row for row in rows if window_start <= row.transaction_date <= current
-        ]
+        window_rows = [row for row in rows if window_start <= row.transaction_date <= current]
         totals = _sum_rows(window_rows)
         window_months = {"month": 1, "quarter": 3, "year": 12}[window]
         points.append(
@@ -577,8 +569,8 @@ def _build_recent(
             category_name=category_names.get(row.category_id),
             subcategory_id=row.subcategory_id,
             subcategory_name=subcategory_names.get(row.subcategory_id),
-            source_account_id=row.source_account_id,
-            source_account_name=account_names[row.source_account_id],
+            account_id=row.account_id,
+            account_name=account_names[row.account_id],
         )
         for row in recent_rows
     )

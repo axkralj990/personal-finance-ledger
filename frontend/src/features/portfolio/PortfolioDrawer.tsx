@@ -272,7 +272,7 @@ export function PortfolioDrawer({ state, onClose, onSaved, onConflict }: { state
       const ready = previews.filter((preview) => preview.status === "ready");
       const currentPreview = ready.find((preview) => preview.assetId === current.id);
       const failures = previews.filter((preview) => preview.status === "error");
-      if (!ready.length) return { warning: failures[0]?.status === "error" ? failures[0].error.message : "The quote provider returned no latest price.", valuedAt: null };
+      if (!ready.length) return { warning: failures[0]?.status === "error" ? failures[0].error.message : "The market data service returned no latest price.", valuedAt: null };
       await api.portfolio.saveQuoteSnapshots(ready);
       const warning = failures.length
         ? `${failures.length} grouped purchase quote${failures.length === 1 ? "" : "s"} could not be refreshed. ${failures.map((failure) => failure.status === "error" ? failure.error.message : "").join(" ")}`

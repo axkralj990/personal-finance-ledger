@@ -26,6 +26,7 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connection = config.attributes.get("connection")
     if connection is not None:
+        config.attributes["fresh_install"] = not _has_alembic_version(connection)
         context.configure(
             connection=connection, target_metadata=target_metadata, render_as_batch=True
         )
@@ -38,11 +39,21 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as created_connection:
+        config.attributes["fresh_install"] = not _has_alembic_version(created_connection)
+        created_connection.commit()
         context.configure(
             connection=created_connection, target_metadata=target_metadata, render_as_batch=True
         )
         with context.begin_transaction():
             context.run_migrations()
+
+
+def _has_alembic_version(connection) -> bool:
+    return bool(
+        connection.exec_driver_sql(
+            "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'alembic_version'"
+        ).scalar()
+    )
 
 
 if context.is_offline_mode():

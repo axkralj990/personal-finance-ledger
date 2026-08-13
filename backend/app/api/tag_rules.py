@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from backend.app.api.dependencies import SessionDependency
 from backend.app.api.pagination import Page
-from backend.app.database.models import Provider, RuleScope, TagRule, utc_now
+from backend.app.database.models import RuleScope, TagRule, utc_now
 from backend.app.problems import Problem
 from backend.app.sources.normalization import normalize_description
 from backend.app.tagging.service import validate_rule_scope
@@ -16,10 +16,11 @@ router = APIRouter(prefix="/tag-rules", tags=["tag rules"])
 
 
 class TagRuleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     description: str = Field(min_length=1)
     scope: RuleScope
-    source_account_id: str | None = None
-    provider: Provider | None = None
+    account_id: str | None = None
     category_id: str
     subcategory_id: str | None = None
 
@@ -36,8 +37,7 @@ class TagRuleRead(BaseModel):
     id: str
     normalized_description: str
     scope: RuleScope
-    source_account_id: str | None
-    provider: Provider | None
+    account_id: str | None
     category_id: str
     subcategory_id: str | None
     is_enabled: bool
@@ -64,7 +64,7 @@ def list_tag_rules(
 @router.post("", response_model=TagRuleRead, status_code=201)
 def create_tag_rule(payload: TagRuleCreate, session: SessionDependency) -> TagRule:
     try:
-        validate_rule_scope(payload.scope, payload.source_account_id, payload.provider)
+        validate_rule_scope(payload.scope, payload.account_id)
     except ValueError as exc:
         raise Problem(422, "invalid_rule_scope", str(exc), field="scope") from exc
     validate_active_taxonomy(session, payload.category_id, payload.subcategory_id)

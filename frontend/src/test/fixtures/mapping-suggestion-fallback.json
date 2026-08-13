@@ -1,0 +1,25 @@
+{
+  "batch_id": "batch-1",
+  "revision": 4,
+  "result": {
+    "status": "manual_fallback",
+    "error": {
+      "code": "timeout",
+      "message": "The mapping suggestion timed out; retry later or map manually.",
+      "retryable": true
+    },
+    "audit": {
+      "provider": "openai",
+      "model": "gpt-test",
+      "request_id": null,
+      "prompt_version": "universal-import-mapping-v1",
+      "schema_version": "universal-v1",
+      "payload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "consented_at": "2026-08-12T10:00:00Z",
+      "requested_at": "2026-08-12T10:00:00Z",
+      "duration_ms": 10,
+      "outcome": "manual_fallback",
+      "error_code": "timeout"
+    }
+  }
+}

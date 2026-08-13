@@ -12,20 +12,19 @@ const transaction: Transaction = {
   amountMinor: -1250,
   currency: "EUR",
   kind: "EXPENSE",
-  sourceAccountId: "account-1",
-  sourceAccountName: "Manual EUR",
+  accountId: "account-1",
+  accountName: "Manual EUR",
   categoryId: null,
   categoryName: null,
   subcategoryId: null,
   subcategoryName: null,
-  excluded: false,
   importBatchId: "batch-1",
 };
 
 describe("TransactionsPage", () => {
   it("confirms and permanently deletes the current revision", async () => {
     const user = userEvent.setup();
-    vi.spyOn(api.sourceAccounts, "list").mockResolvedValue([]);
+    vi.spyOn(api.accounts, "list").mockResolvedValue([]);
     vi.spyOn(api.taxonomy, "categories").mockResolvedValue([]);
     vi.spyOn(api.transactions, "currencies").mockResolvedValue(["EUR"]);
     vi.spyOn(api.transactions, "list").mockResolvedValue({
@@ -47,7 +46,7 @@ describe("TransactionsPage", () => {
 
   it("stores an exactly parsed signed amount correction", async () => {
     const user = userEvent.setup();
-    vi.spyOn(api.sourceAccounts, "list").mockResolvedValue([]);
+    vi.spyOn(api.accounts, "list").mockResolvedValue([]);
     vi.spyOn(api.taxonomy, "categories").mockResolvedValue([]);
     vi.spyOn(api.transactions, "currencies").mockResolvedValue(["EUR"]);
     vi.spyOn(api.transactions, "list").mockResolvedValue({

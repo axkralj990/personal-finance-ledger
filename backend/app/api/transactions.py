@@ -31,8 +31,8 @@ class TransactionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    source_account_id: str
-    source_account_name: str = ""
+    account_id: str
+    account_name: str = ""
     transaction_date: date
     transaction_at: datetime | None
     description: str
@@ -79,28 +79,25 @@ def list_transactions(
     currency: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
     date_from: date | None = None,
     date_to: date | None = None,
-    source_account_id: str | None = None,
+    account_id: str | None = None,
     category_id: str | None = None,
     search: str | None = None,
-    include_excluded: bool = False,
 ) -> Page[TransactionRead]:
-    conditions = []
+    conditions = [Transaction.is_excluded.is_(False)]
     if currency:
         conditions.append(Transaction.currency == currency.upper())
     if date_from:
         conditions.append(Transaction.transaction_date >= date_from)
     if date_to:
         conditions.append(Transaction.transaction_date <= date_to)
-    if source_account_id:
-        conditions.append(Transaction.source_account_id == source_account_id)
+    if account_id:
+        conditions.append(Transaction.account_id == account_id)
     if category_id:
         conditions.append(Transaction.category_id == category_id)
     if search:
         conditions.append(
             Transaction.normalized_description.contains(normalize_description(search))
         )
-    if not include_excluded:
-        conditions.append(Transaction.is_excluded.is_(False))
     total = int(
         session.scalar(select(func.count()).select_from(Transaction).where(*conditions)) or 0
     )
@@ -143,7 +140,7 @@ def patch_transaction(
     transaction_id: str, payload: TransactionPatch, session: SessionDependency
 ) -> TransactionRead:
     transaction = session.get(Transaction, transaction_id)
-    if transaction is None:
+    if transaction is None or _is_import_ignored(session, transaction):
         raise Problem(404, "transaction_not_found", "Transaction was not found")
     if transaction.revision != payload.expected_revision:
         raise Problem(
@@ -195,7 +192,7 @@ def delete_transaction(
     session: SessionDependency,
 ) -> Response:
     transaction = session.get(Transaction, transaction_id)
-    if transaction is None:
+    if transaction is None or _is_import_ignored(session, transaction):
         raise Problem(404, "transaction_not_found", "Transaction was not found")
     if transaction.revision != payload.expected_revision:
         raise Problem(
@@ -255,10 +252,15 @@ def _json_value(value: Any) -> Any:
     return value.value if hasattr(value, "value") else value
 
 
+def _is_import_ignored(session: SessionDependency, transaction: Transaction) -> bool:
+    staged = session.get(StagedTransaction, transaction.staged_transaction_id)
+    return bool(staged and staged.disposition == StagedDisposition.IGNORE)
+
+
 def _transaction_read(transaction: Transaction) -> TransactionRead:
     return TransactionRead.model_validate(transaction).model_copy(
         update={
-            "source_account_name": transaction.account.display_name,
+            "account_name": transaction.account.name,
             "category_name": transaction.category.display_name if transaction.category else None,
             "subcategory_name": (
                 transaction.subcategory.display_name if transaction.subcategory else None

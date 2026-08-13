@@ -1,6 +1,9 @@
 # Synology Deployment
 
-This runbook deploys one application container through Synology Container Manager. It uses SQLite and a host directory mounted at `/data`; there is no external database, worker, or bundled reverse proxy.
+This runbook deploys the production application container on Synology. It uses SQLite and an
+external host directory mounted at `/data`; there is no external database, worker, or bundled
+reverse proxy. The commands use the repository wrapper so the environment file, Compose project,
+and Compose files cannot be selected implicitly.
 
 ## Security Boundary
 
@@ -8,61 +11,89 @@ The application has no authentication or authorization. Keep it on a trusted LAN
 
 ## Prepare the Filesystem
 
-Choose separate locations for the project files and persistent data. The examples use:
+Choose separate locations for project files, production data, test data, and host configuration.
+The examples use:
 
 ```text
 /volume1/docker/personal-finance/app
-/volume1/docker/personal-finance/data
+/volume1/docker/personal-finance/data/production
+/volume1/docker/personal-finance/data/test
+/volume1/docker/personal-finance/config
 ```
 
 Create the data directory over SSH or with an equivalent DSM file-management workflow:
 
 ```sh
-sudo mkdir -p /volume1/docker/personal-finance/data
+sudo mkdir -p /volume1/docker/personal-finance/data/production
+sudo mkdir -p /volume1/docker/personal-finance/data/test
+sudo mkdir -p /volume1/docker/personal-finance/config
 sudo chown -R 10001:10001 /volume1/docker/personal-finance/data
-sudo chmod 750 /volume1/docker/personal-finance/data
+sudo chmod 750 /volume1/docker/personal-finance/data/production
+sudo chmod 750 /volume1/docker/personal-finance/data/test
 ```
 
-The image runs as UID/GID `10001:10001`. The directory must remain writable by that identity. Place the repository or an exported release in `/volume1/docker/personal-finance/app`, then create its environment file:
+The image runs as UID/GID `10001:10001`. Both data directories must remain writable by that
+identity. Place the repository or an exported release in
+`/volume1/docker/personal-finance/app`, then create the external production environment file:
 
 ```sh
 cd /volume1/docker/personal-finance/app
-cp .env.example .env
+cp environments/main.env.example \
+  /volume1/docker/personal-finance/config/main.env
+chmod 600 /volume1/docker/personal-finance/config/main.env
 ```
 
-Set at least these values in `.env`:
+Set at least these values in `/volume1/docker/personal-finance/config/main.env`:
 
 ```dotenv
-FINANCE_DATA_PATH=/volume1/docker/personal-finance/data
+FINANCE_DATA_PATH=/volume1/docker/personal-finance/data/production
 FINANCE_HOST_PORT=8000
 TIMEZONE=Europe/Ljubljana
 MAX_UPLOAD_BYTES=20971520
 MAX_FILE_ROWS=20000
 QUOTE_PREVIEW_MAX_AGE_HOURS=24
+ALLOWED_HOSTS=NAS-LAN-IP,finance.example.internal
+ALLOWED_ORIGINS=http://NAS-LAN-IP:8000,https://finance.example.internal
 ```
 
-`FINANCE_DATA_PATH` is a host path. Compose mounts it at the fixed container `DATA_DIR=/data`. `FRONTEND_DIST_PATH` is fixed at `/app/frontend/dist`.
+`FINANCE_DATA_PATH` is required, absolute, external to the Git root or exported release directory,
+and must already exist. `FINANCE_HOST_PORT` must be numeric and between 1 and 65535. If both
+production and test environment files exist, their host ports and data directories must differ.
+Compose mounts it at the fixed container `DATA_DIR=/data`. `FRONTEND_DIST_PATH` is fixed at
+`/app/frontend/dist`.
 Manual portfolio valuations, ECB FX previews, and Yahoo Finance quotes work without an API
-key. Keep local settings only in `.env`; do not place them in `compose.yaml`,
+key. Keep local settings only in the external environment file; do not place them in `compose.yaml`,
 source control, screenshots, or logs.
 
-## Create the Container Manager Project
+OpenAI import mapping is optional and disabled by default. If enabled, place
+`OPENAI_MAPPING_ENABLED=true` and `OPENAI_API_KEY` only in the permission-restricted environment file,
+and select the provider's lowest retention/data-use setting. Never expose the key to the
+browser or support logs. Mapping sends headers and locally redacted representative values;
+manual mapping remains available when the provider is unavailable. `ALLOWED_HOSTS` must list
+each exact hostname accepted by the app, without a scheme. `ALLOWED_ORIGINS` must list each
+corresponding browser origin, including scheme and non-default port. Separate multiple values
+with commas.
 
-1. Open **Container Manager > Project > Create**.
-2. Select `/volume1/docker/personal-finance/app` as the project path.
-3. Use the existing `compose.yaml` in that directory.
-4. Build and start the project.
+## Start Production
 
-The equivalent SSH commands are:
+Set the external configuration directory and use the wrapper:
 
 ```sh
 cd /volume1/docker/personal-finance/app
-docker compose config
-docker compose build --pull
-docker compose up -d
+export FINANCE_ENV_DIR=/volume1/docker/personal-finance/config
+./scripts/finance.sh start
+./scripts/finance.sh status
 ```
 
-No source directory is mounted into the container. Only the persistent data directory is mounted.
+This creates the explicit Compose project `finance-main`. No source directory is mounted
+into the container. Only the production data directory is mounted. If Container Manager is used
+to inspect or manage the resulting container, keep the project name unchanged. Do not create a
+second GUI project from `compose.yaml` without explicitly reproducing the same environment file,
+project name, and both Compose files.
+
+Values in the selected environment file take precedence over exported application settings in
+the SSH session, including `FINANCE_HOST_PORT`. The wrapper preserves Docker connection settings.
+An exported release does not need `.git`; the wrapper uses its own directory as the protected root.
 
 ## Network and Reverse Proxy
 
@@ -72,12 +103,14 @@ For a DSM reverse proxy, create an HTTPS source hostname and send it to `http://
 
 ## Health and Logs
 
-The container initializes the schema, seeds source accounts, and then reports healthy when `/health` returns successfully:
+The container initializes the schema, seeds the `Unknown` account, and then reports healthy when `/health` returns successfully:
 
 ```sh
-docker compose ps
+FINANCE_ENV_DIR=/volume1/docker/personal-finance/config \
+  ./scripts/finance.sh status
 curl --fail http://127.0.0.1:8000/health
-docker compose logs --tail=100 app
+FINANCE_ENV_DIR=/volume1/docker/personal-finance/config \
+  ./scripts/finance.sh logs
 ```
 
 Container logs use the `json-file` driver with three 10 MB files. Avoid pasting import output or transaction details into support channels.
@@ -88,23 +121,30 @@ Back up first, then retain the current image as a local rollback target and buil
 
 ```sh
 cd /volume1/docker/personal-finance/app
-./scripts/backup.sh
+export FINANCE_ENV_DIR=/volume1/docker/personal-finance/config
+./scripts/finance.sh backup
 docker image tag personal-finance:latest personal-finance:rollback-YYYYMMDD
-docker compose build --pull
-docker compose up -d
-docker compose ps
+./scripts/finance.sh start
+./scripts/finance.sh status
 ```
 
 Run the health check and inspect logs after every update. Database migrations run automatically at startup.
 
 ## Rollback
 
-To run the retained image without rebuilding it:
+To run the retained image without rebuilding it, temporarily set `FINANCE_IMAGE_TAG` in the
+external production environment file and run the fully explicit command below:
 
 ```sh
 cd /volume1/docker/personal-finance/app
-FINANCE_IMAGE_TAG=rollback-YYYYMMDD docker compose up -d --no-build app
-docker compose ps
+docker compose \
+  --env-file /volume1/docker/personal-finance/config/main.env \
+  --project-name finance-main \
+  --project-directory /volume1/docker/personal-finance/app \
+  -f /volume1/docker/personal-finance/app/compose.yaml \
+  up -d --no-build app
+FINANCE_ENV_DIR=/volume1/docker/personal-finance/config \
+  ./scripts/finance.sh status
 ```
 
 An older application image might not support a newer database schema. If application rollback alone fails, stop the app and restore the matching pre-update backup using [backup and restore](backup-restore.md).

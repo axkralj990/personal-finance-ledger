@@ -3,21 +3,21 @@ import { MoreHorizontal } from "lucide-react";
 import { ApiProblem, api } from "../api/client";
 import type { Transaction } from "../api/types";
 import { Drawer } from "../components/Drawer";
-import { EmptyState, ErrorState, Field, InlineNotice, LoadingState, PageHeader, StatusBadge } from "../components/ui";
+import { EmptyState, ErrorState, Field, InlineNotice, LoadingState, PageHeader } from "../components/ui";
 import { useResource } from "../hooks/use-resource";
 import { formatDate, formatMoney, minorToMajorInput, parseMajorAmount } from "../shared/format";
 import { subcategoriesFor, taxonomyError } from "../shared/taxonomy";
 
 export default function TransactionsPage() {
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({ currency: "", dateFrom: "", dateTo: "", sourceAccountId: "", categoryId: "", search: "", includeExcluded: false });
+  const [filters, setFilters] = useState({ currency: "", dateFrom: "", dateTo: "", accountId: "", categoryId: "", search: "" });
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Transaction | null>(null);
-  const [edit, setEdit] = useState({ amount: "", categoryId: "", subcategoryId: "", excluded: false });
+  const [edit, setEdit] = useState({ amount: "", categoryId: "", subcategoryId: "" });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const accounts = useResource(() => api.sourceAccounts.list(), "transaction-accounts");
+  const accounts = useResource(() => api.accounts.list(), "transaction-accounts");
   const categories = useResource(() => api.taxonomy.categories(), "transaction-categories");
   const currencies = useResource(() => api.transactions.currencies(), "transaction-currencies");
   const queryKey = JSON.stringify({ ...filters, page });
@@ -36,7 +36,7 @@ export default function TransactionsPage() {
 
   function openTransaction(transaction: Transaction) {
     setSelected(transaction);
-    setEdit({ amount: minorToMajorInput(transaction.amountMinor), categoryId: transaction.categoryId ?? "", subcategoryId: transaction.subcategoryId ?? "", excluded: transaction.excluded });
+    setEdit({ amount: minorToMajorInput(transaction.amountMinor), categoryId: transaction.categoryId ?? "", subcategoryId: transaction.subcategoryId ?? "" });
     setSaveError(null);
   }
 
@@ -63,7 +63,6 @@ export default function TransactionsPage() {
         amountMinor: parsedAmount,
         categoryId: edit.categoryId || null,
         subcategoryId: edit.subcategoryId || null,
-        excluded: edit.excluded,
       });
       setSelected(updated);
       transactions.reload();
@@ -122,11 +121,10 @@ export default function TransactionsPage() {
         <Field label="Search description" htmlFor="transaction-search"><input id="transaction-search" className="search-field" type="search" placeholder="Merchant or description" value={search} onChange={(event) => setSearch(event.target.value)} /></Field>
         {search && <button type="button" className="button ghost" onClick={() => setSearch("")}>Clear search</button>}
         <Field label="Currency" htmlFor="transaction-currency"><select id="transaction-currency" value={filters.currency} onChange={(event) => setFilter("currency", event.target.value)}><option value="">All currencies</option>{currencyOptions.map((currency) => <option key={currency}>{currency}</option>)}</select></Field>
-        <Field label="Account" htmlFor="transaction-account"><select id="transaction-account" value={filters.sourceAccountId} onChange={(event) => setFilter("sourceAccountId", event.target.value)}><option value="">All accounts</option>{accounts.data?.map((account) => <option value={account.id} key={account.id}>{account.displayName}</option>)}</select></Field>
+        <Field label="Account" htmlFor="transaction-account"><select id="transaction-account" value={filters.accountId} onChange={(event) => setFilter("accountId", event.target.value)}><option value="">All accounts</option>{accounts.data?.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></Field>
         <Field label="Category" htmlFor="transaction-category"><select id="transaction-category" value={filters.categoryId} onChange={(event) => setFilter("categoryId", event.target.value)}><option value="">All categories</option>{categories.data?.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></Field>
         <Field label="From" htmlFor="transaction-from"><input id="transaction-from" type="date" value={filters.dateFrom} onChange={(event) => setFilter("dateFrom", event.target.value)} /></Field>
         <Field label="To" htmlFor="transaction-to"><input id="transaction-to" type="date" value={filters.dateTo} onChange={(event) => setFilter("dateTo", event.target.value)} /></Field>
-        <label className="checkbox-field"><input type="checkbox" checked={filters.includeExcluded} onChange={(event) => setFilter("includeExcluded", event.target.checked)} /> Include excluded</label>
       </div>
 
       {accounts.error && <ErrorState error={accounts.error} retry={accounts.reload} />}
@@ -142,10 +140,10 @@ export default function TransactionsPage() {
               <table className="data-table">
                 <thead><tr><th>Date</th><th>Description</th><th>Account</th><th>Category</th><th className="amount">Amount</th><th><span className="sr-only">Actions</span></th></tr></thead>
                 <tbody>{data.items.map((item) => (
-                  <tr key={item.id} className={item.excluded ? "inactive" : ""}>
+                  <tr key={item.id}>
                     <td>{formatDate(item.date)}</td>
-                    <td><strong>{item.description}</strong>{item.excluded && <><br /><StatusBadge tone="warn">Excluded</StatusBadge></>}</td>
-                    <td>{item.sourceAccountName}</td>
+                    <td><strong>{item.description}</strong></td>
+                    <td>{item.accountName}</td>
                     <td>{item.categoryName ?? "Uncategorized"}{item.subcategoryName && <><br /><small>{item.subcategoryName}</small></>}</td>
                     <td className="amount">{formatMoney(item.amountMinor, item.currency)}</td>
                     <td><button className="row-action" aria-label={`Edit ${item.description}`} onClick={() => openTransaction(item)}><MoreHorizontal aria-hidden="true" /></button></td>
@@ -155,8 +153,8 @@ export default function TransactionsPage() {
             </div>
             <div className="mobile-records">
               {data.items.map((item) => (
-                <article className={`record-card ${item.excluded ? "inactive" : ""}`} key={item.id}>
-                  <div className="record-card-header"><div><h3>{item.description}</h3><p>{formatDate(item.date)} / {item.sourceAccountName}</p></div><strong className="amount">{formatMoney(item.amountMinor, item.currency)}</strong></div>
+                <article className="record-card" key={item.id}>
+                  <div className="record-card-header"><div><h3>{item.description}</h3><p>{formatDate(item.date)} / {item.accountName}</p></div><strong className="amount">{formatMoney(item.amountMinor, item.currency)}</strong></div>
                   <div className="record-card-footer"><span>{item.categoryName ?? "Uncategorized"}</span><button className="button ghost" onClick={() => openTransaction(item)}>Correct</button></div>
                 </article>
               ))}
@@ -175,9 +173,8 @@ export default function TransactionsPage() {
             <section className="detail-section"><h3>Ledger identity</h3><dl className="detail-list"><dt>Stable ID</dt><dd>{selected.id}</dd><dt>Import batch</dt><dd>{selected.importBatchId ?? "Manual lineage unavailable"}</dd><dt>Amount</dt><dd className="num">{formatMoney(selected.amountMinor, selected.currency)}</dd></dl></section>
             <section className="detail-section"><h3>Correction</h3><div className="form-grid">
               <Field label={`Amount (${selected.currency})`} htmlFor="edit-amount" error={amountError}>{(accessibility) => <input {...accessibility} id="edit-amount" inputMode="decimal" value={edit.amount} onChange={(event) => setEdit((current) => ({ ...current, amount: event.target.value }))} />}</Field>
-              <Field label="Category" htmlFor="edit-category"><select id="edit-category" value={edit.categoryId} onChange={(event) => setEdit({ amount: edit.amount, categoryId: event.target.value, subcategoryId: "", excluded: edit.excluded })}><option value="">Uncategorized</option>{categories.data?.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+              <Field label="Category" htmlFor="edit-category"><select id="edit-category" value={edit.categoryId} onChange={(event) => setEdit({ amount: edit.amount, categoryId: event.target.value, subcategoryId: "" })}><option value="">Uncategorized</option>{categories.data?.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
                <Field label="Subcategory" htmlFor="edit-subcategory" error={combinationError}>{(accessibility) => <select {...accessibility} id="edit-subcategory" value={edit.subcategoryId} disabled={!edit.categoryId} onChange={(event) => setEdit((current) => ({ ...current, subcategoryId: event.target.value }))}><option value="">None</option>{subcategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</Field>
-              <label className="checkbox-field wide"><input type="checkbox" checked={edit.excluded} onChange={(event) => { if (event.target.checked && !window.confirm("Exclude this transaction from reports while retaining it in the ledger?")) return; setEdit((current) => ({ ...current, excluded: event.target.checked })); }} /> Exclude from reports while retaining this ledger record</label>
             </div></section>
             {saveError && <InlineNotice tone="bad">{saveError}</InlineNotice>}
           </>

@@ -171,9 +171,7 @@ def patch_asset(session: Session, asset_id: str, data: AssetPatchData) -> Asset:
     for field, value in changes.items():
         setattr(asset, field, value)
     cost_effective_date = (
-        data.effective_at
-        or asset.cost_basis_fx_rate_date
-        or asset.acquisition_date
+        data.effective_at or asset.cost_basis_fx_rate_date or asset.acquisition_date
     )
     _validate_asset_model(asset, cost_effective_date)
 

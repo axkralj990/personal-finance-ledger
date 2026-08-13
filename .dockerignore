@@ -2,7 +2,7 @@
 .gitignore
 .env
 .env.*
-!.env.example
+environments/
 
 data/
 etf/

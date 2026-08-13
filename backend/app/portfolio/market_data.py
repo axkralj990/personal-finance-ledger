@@ -140,9 +140,7 @@ class MarketDataClient:
                     valued_at=quote.valued_at,
                     native_currency=asset.currency,
                     native_value_minor=native_value,
-                    eur_value_minor=convert_minor_to_eur(
-                        native_value, Decimal(fx.rate_to_eur)
-                    ),
+                    eur_value_minor=convert_minor_to_eur(native_value, Decimal(fx.rate_to_eur)),
                     quantity=asset.quantity or "",
                     unit_price=quote.unit_price,
                     quote_symbol=asset.quote_symbol or "",
@@ -220,6 +218,7 @@ class MarketDataClient:
                 "Asset does not have a complete market quote configuration",
                 False,
             )
+
     def _fetch_market_quote(self, asset: Asset) -> tuple[_Quote, ValuationSource]:
         venue = _yahoo_venue(asset)
         cache_key = (asset.quote_symbol or "", venue.key, asset.currency)
@@ -269,9 +268,7 @@ class MarketDataClient:
             market_time = int(meta["regularMarketTime"])
             timezone_name = str(meta["exchangeTimezoneName"])
             name = _provider_name(meta.get("longName") or meta.get("shortName"))
-            market_date = datetime.fromtimestamp(
-                market_time, ZoneInfo(timezone_name)
-            ).date()
+            market_date = datetime.fromtimestamp(market_time, ZoneInfo(timezone_name)).date()
         except (
             IndexError,
             KeyError,

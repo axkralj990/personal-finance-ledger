@@ -148,8 +148,8 @@ class RecentTransactionRead(DashboardApiModel):
     category_name: str | None
     subcategory_id: str | None
     subcategory_name: str | None
-    source_account_id: str
-    source_account_name: str
+    account_id: str
+    account_name: str
 
 
 class DashboardQualityRead(DashboardApiModel):

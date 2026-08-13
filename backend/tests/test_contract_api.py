@@ -6,26 +6,19 @@ from sqlalchemy import select
 from backend.app.config import Settings
 from backend.app.database.models import TransactionDeletion, TransactionEvent
 from backend.app.main import create_app
-from backend.app.sources.seed import seed_source_accounts
+from backend.app.sources.seed import seed_accounts
 
 
 def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa: PLR0915
-    accounts_response = client.get("/api/v1/source-accounts")
+    accounts_response = client.get("/api/v1/accounts")
     assert accounts_response.status_code == 200
     accounts = accounts_response.json()
-    assert [(item["display_name"], item["default_currency"]) for item in accounts] == [
-        ("DBS EUR", "EUR"),
-        ("Legacy historical ledger", "EUR"),
-        ("Manual EUR", "EUR"),
-        ("Mastercard EUR", "EUR"),
-        ("Revolut Joint EUR", "EUR"),
-        ("Revolut Personal EUR", "EUR"),
-    ]
-    manual_account = next(item for item in accounts if item["provider"] == "MANUAL")
+    assert [(item["name"], item["default_currency"]) for item in accounts] == [("Unknown", "EUR")]
+    manual_account = accounts[0]
 
     with app.state.database.session() as session:
-        seed_source_accounts(session)
-    assert len(client.get("/api/v1/source-accounts").json()) == 6
+        seed_accounts(session)
+    assert len(client.get("/api/v1/accounts").json()) == 1
 
     category_response = client.post(
         "/api/v1/categories", json={"display_name": "Contract spending"}
@@ -55,7 +48,7 @@ def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa:
     manual_response = client.post(
         "/api/v1/manual-imports",
         json={
-            "source_account_id": manual_account["id"],
+            "account_id": manual_account["id"],
             "rows": [
                 {
                     "transaction_date": "2026-01-10",
@@ -109,17 +102,20 @@ def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa:
     assert first_page.json()["items"][0]["raw_json"]["transaction_date"] == "2026-01-10"
     assert first_page.json()["items"][0]["duplicate_candidate"] is None
 
-    committed = client.post(f"/api/v1/imports/{batch['id']}/commit")
+    committed = client.post(
+        f"/api/v1/imports/{batch['id']}/commit",
+        json={"expected_revision": batch["revision"]},
+    )
     assert committed.status_code == 200
     assert committed.json()["status"] == "COMMITTED"
 
     account_filter = client.get(
         "/api/v1/transactions",
-        params={"source_account_id": manual_account["id"], "page_size": 10},
+        params={"account_id": manual_account["id"], "page_size": 10},
     )
     assert account_filter.status_code == 200
     assert account_filter.json()["total"] == 4
-    assert account_filter.json()["items"][0]["source_account_name"] == "Manual EUR"
+    assert account_filter.json()["items"][0]["account_name"] == "Unknown"
     category_filter = client.get(
         "/api/v1/transactions", params={"category_id": category["id"], "page_size": 10}
     )
@@ -154,14 +150,14 @@ def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa:
     assert summary.json()["spending_minor"] == 1250
     assert summary.json()["net_flow_minor"] == -1250
     assert categories.json()["items"] == [{"label": "Contract spending", "amount_minor": 1250}]
-    assert account_report.json()["items"] == [{"label": "Manual EUR", "amount_minor": -1250}]
+    assert account_report.json()["items"] == [{"label": "Unknown", "amount_minor": -1250}]
     assert trend.json()["items"] == [{"label": "2026-01", "amount_minor": -1250}]
     assert recent.json()["items"][0]["category_name"] == "Contract spending"
 
     duplicate_batch = client.post(
         "/api/v1/manual-imports",
         json={
-            "source_account_id": manual_account["id"],
+            "account_id": manual_account["id"],
             "rows": [
                 {
                     "transaction_date": "2026-01-11",
@@ -184,7 +180,7 @@ def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa:
         "description": "January coffee",
         "amount_minor": -1250,
         "currency": "EUR",
-        "source_account_name": "Manual EUR",
+        "account_name": "Unknown",
     }
 
     january_transaction = recent.json()["items"][0]
@@ -221,7 +217,7 @@ def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa:
     )
     assert patched.status_code == 200
     assert patched.json()["is_excluded"] is True
-    assert patched.json()["source_account_name"] == "Manual EUR"
+    assert patched.json()["account_name"] == "Unknown"
     assert client.get("/api/v1/reports/summary", params=report_params).json()["spending_minor"] == 0
 
     stale_delete = client.request(
@@ -250,11 +246,18 @@ def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa:
         assert tombstone is not None
         assert tombstone.reason == "USER_DELETED"
 
-    assert client.delete(f"/api/v1/imports/{duplicate_batch['id']}").status_code == 204
+    assert (
+        client.request(
+            "DELETE",
+            f"/api/v1/imports/{duplicate_batch['id']}",
+            json={"expected_revision": duplicate_batch["revision"]},
+        ).status_code
+        == 204
+    )
     replacement = client.post(
         "/api/v1/manual-imports",
         json={
-            "source_account_id": manual_account["id"],
+            "account_id": manual_account["id"],
             "rows": [
                 {
                     "transaction_date": "2026-01-10",
@@ -268,13 +271,16 @@ def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa:
     )
     assert replacement.status_code == 201
     assert replacement.json()["duplicate_rows"] == 0
-    recommitted = client.post(f"/api/v1/imports/{replacement.json()['id']}/commit")
+    recommitted = client.post(
+        f"/api/v1/imports/{replacement.json()['id']}/commit",
+        json={"expected_revision": replacement.json()["revision"]},
+    )
     assert recommitted.status_code == 200
 
     openapi = client.get("/openapi.json").json()
     assert "/api/v1/reports/categories" in openapi["paths"]
     transaction_schema = openapi["components"]["schemas"]["TransactionRead"]["properties"]
-    assert "source_account_name" in transaction_schema
+    assert "account_name" in transaction_schema
     assert "is_excluded" in transaction_schema
     assert "delete" in openapi["paths"]["/api/v1/transactions/{transaction_id}"]
 

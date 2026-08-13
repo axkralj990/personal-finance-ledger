@@ -69,7 +69,7 @@ function mockPortfolioApi(options: { assetsFail?: boolean; quoteSaveFail?: boole
     if (url === "/api/v1/assets") return options.assetsFail ? json({ code: "assets_unavailable", message: "Asset service unavailable" }, 503) : json(options.assetItems ?? assets);
     if (url === "/api/v1/portfolio") return json(options.report ?? portfolio);
     if (url.includes("history-preview")) { const assetId = new URL(url, "http://localhost").searchParams.get("asset_id"); const items = assetId === "asset-1" ? options.historyItems ?? [] : []; return json({ asset_id: assetId, asset_revision: 2, source: "YAHOO_FINANCE", available_months: items.length, existing_months: 0, first_date: items[0] ? "2026-06-30" : null, last_date: items.length ? "2026-07-31" : null, items }); }
-    if (url.includes("quote-preview")) return json({ items: options.quoteItems ?? [readyPreview, { status: "error", asset_id: "asset-2", asset_revision: 1, error: { code: "provider_error", message: "Symbol was not found", recoverable: true } }] });
+    if (url.includes("quote-preview")) return json({ items: options.quoteItems ?? [readyPreview, { status: "error", asset_id: "asset-2", asset_revision: 1, error: { code: "market_data_error", message: "Symbol was not found", recoverable: true } }] });
     if (url.includes("fx-preview")) { const params = new URL(url, "http://localhost").searchParams; const requested = params.get("valued_at"); return json({ currency: params.get("currency"), valued_at: options.fxDateMismatch ? "2026-01-01" : requested, source: "ECB", rate_to_eur: "0.92", rate_date: requested === "2026-08-11" ? "2026-08-10" : requested, preview_token: "e".repeat(64) }); }
     if (url.endsWith("quote-snapshots")) return options.quoteSaveFail ? json({ code: "save_failed", message: "Snapshot write failed" }, 500) : json({ items: [valuation] }, 201);
     if (url.endsWith("/valuations") && !init?.method) return json([valuation]);
@@ -109,7 +109,7 @@ describe("PortfolioPage", () => {
     expect(JSON.parse(String(snapshotCall?.[1]?.body)).items[0].preview_token).toBe("c".repeat(64));
   });
 
-  it("flags mixed provider instruments inside one grouped quote review", async () => {
+  it("flags mixed market sources inside one grouped quote review", async () => {
     const fixture = duplicateTickerFixture();
     const secondPreview = {
       ...readyPreview,

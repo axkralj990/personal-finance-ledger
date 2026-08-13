@@ -3,16 +3,15 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 
 from backend.app.database.models import (
+    Account,
     Base,
     BatchStatus,
     Category,
     DuplicateStatus,
     ImportBatch,
     RuleScope,
-    SourceAccount,
     StagedDisposition,
     StagedTransaction,
     TagRule,
@@ -25,9 +24,9 @@ from backend.app.imports.service import ImportService
 from backend.app.problems import Problem
 
 
-def _batch(session, account: SourceAccount, suffix: str = "a") -> ImportBatch:
+def _batch(session, account: Account, suffix: str = "a") -> ImportBatch:
     batch = ImportBatch(
-        source_account_id=account.id,
+        account_id=account.id,
         original_filename=f"{suffix}.csv",
         retained_path=f"synthetic/{suffix}.csv",
         file_sha256=suffix * 64,
@@ -51,7 +50,7 @@ def _staged(
 ) -> StagedTransaction:
     return StagedTransaction(
         batch_id=batch.id,
-        ledger_account_id=batch.source_account_id,
+        account_id=batch.account_id,
         row_number=row_number,
         raw_json={"synthetic": row_number},
         transaction_date=transaction_date,
@@ -66,7 +65,7 @@ def _staged(
     )
 
 
-def test_duplicate_exact_and_likely(database: Database, account: SourceAccount) -> None:
+def test_duplicate_exact_and_likely(database: Database, account: Account) -> None:
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "food"))
         batch = _batch(session, session.merge(account))
@@ -74,7 +73,7 @@ def test_duplicate_exact_and_likely(database: Database, account: SourceAccount) 
         session.add(original)
         session.flush()
         transaction = Transaction(
-            source_account_id=account.id,
+            account_id=account.id,
             transaction_date=original.transaction_date,
             description=original.description,
             normalized_description=original.normalized_description,
@@ -110,18 +109,19 @@ def test_duplicate_exact_and_likely(database: Database, account: SourceAccount) 
         assert "similarity" in explanation
 
 
-def test_optimistic_staged_row_update(database: Database, account: SourceAccount) -> None:
+def test_optimistic_staged_row_update(database: Database, account: Account, tmp_path: Path) -> None:
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "food"))
         batch = _batch(session, session.merge(account))
         row = _staged(batch, 1, "c" * 64, category.id)
         session.add(row)
         session.commit()
-        service = ImportService(100)
+        service = ImportService(100, tmp_path)
 
         service.update_rows(
             session,
             batch,
+            batch.revision,
             [{"id": row.id, "expected_revision": 1, "description": "New merchant"}],
         )
         assert row.revision == 2
@@ -130,12 +130,15 @@ def test_optimistic_staged_row_update(database: Database, account: SourceAccount
             service.update_rows(
                 session,
                 batch,
+                batch.revision,
                 [{"id": row.id, "expected_revision": 1, "description": "Stale"}],
             )
         assert error.value.status_code == 409
 
 
-def test_commit_is_atomic_and_idempotent(database: Database, account: SourceAccount) -> None:
+def test_commit_is_atomic_and_idempotent(
+    database: Database, account: Account, tmp_path: Path
+) -> None:
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "food"))
         batch = _batch(session, session.merge(account))
@@ -147,7 +150,7 @@ def test_commit_is_atomic_and_idempotent(database: Database, account: SourceAcco
         blocked.disposition = StagedDisposition.BLOCKED
         session.add_all([valid, invalid, blocked])
         session.commit()
-        service = ImportService(100)
+        service = ImportService(100, tmp_path)
 
         with pytest.raises(Problem):
             service.commit(session, batch)
@@ -162,26 +165,65 @@ def test_commit_is_atomic_and_idempotent(database: Database, account: SourceAcco
         assert session.scalar(select(func.count(Transaction.id))) == 2
 
 
-def test_parse_failure_remains_persisted(
-    tmp_path: Path, database: Database, account: SourceAccount
+def test_ignored_row_commits_as_excluded_and_blocks_duplicate(
+    database: Database, account: Account, tmp_path: Path
 ) -> None:
-    malformed = tmp_path / "malformed.csv"
-    malformed.write_bytes(b"\xff\xfe\x00")
     with database.session() as session:
-        service = ImportService(100)
-        with pytest.raises(Problem) as error:
-            service.stage_file(
-                session,
-                session.merge(account),
-                malformed,
-                malformed.name,
-                "9" * 64,
-            )
-        assert error.value.body.code == "parse_failed"
-        batch = session.scalar(select(ImportBatch).where(ImportBatch.file_sha256 == "9" * 64))
-        assert batch is not None
-        assert batch.status == BatchStatus.FAILED
-        assert batch.error_message
+        category = session.scalar(select(Category).where(Category.slug == "food"))
+        batch = _batch(session, session.merge(account), "ignored")
+        ignored = _staged(batch, 1, "9" * 64, category.id, amount_minor=-250)
+        ignored.disposition = StagedDisposition.IGNORE
+        ignored.ignore_reason = "Not part of household spending"
+        session.add(ignored)
+        session.commit()
+
+        service = ImportService(100, tmp_path)
+        assert service.commit(session, batch) == 0
+        transaction = session.scalar(
+            select(Transaction).where(Transaction.staged_transaction_id == ignored.id)
+        )
+        assert transaction is not None
+        assert transaction.is_excluded is True
+        assert transaction.exclusion_reason == "Not part of household spending"
+        assert transaction.excluded_at is not None
+        assert ignored.disposition == StagedDisposition.IGNORE
+
+        duplicate_batch = _batch(session, session.merge(account), "duplicate")
+        duplicate = _staged(duplicate_batch, 1, "9" * 64, category.id, amount_minor=-250)
+        session.add(duplicate)
+        session.flush()
+        status, candidate_id, _ = classify_duplicate(session, duplicate)
+        assert status == DuplicateStatus.EXACT
+        assert candidate_id == transaction.id
+
+
+def test_ignored_row_requires_nonblank_reason(
+    database: Database, account: Account, tmp_path: Path
+) -> None:
+    service = ImportService(100, tmp_path)
+    with database.session() as session:
+        batch = service.stage_manual(
+            session,
+            session.merge(account),
+            [
+                {
+                    "transaction_date": "2026-01-01",
+                    "description": "Ignored",
+                    "amount_minor": -100,
+                    "currency": "EUR",
+                }
+            ],
+        )
+        ignored = batch.staged_rows[0]
+        ignored.disposition = StagedDisposition.IGNORE
+        ignored.ignore_reason = "   "
+        batch.status = BatchStatus.READY
+        session.commit()
+
+        with pytest.raises(Problem, match="Ignored rows require a nonblank reason"):
+            service.commit(session, batch)
+
+        assert session.scalar(select(func.count(Transaction.id))) == 0
 
 
 def test_initial_migration_does_not_call_mutable_metadata(
@@ -201,78 +243,14 @@ def test_initial_migration_does_not_call_mutable_metadata(
         database.dispose()
 
 
-def test_failed_file_can_retry_in_place_and_removes_old_retained_file(
-    tmp_path: Path, database: Database, account: SourceAccount
-) -> None:
-    failed_path = tmp_path / "failed.csv"
-    failed_path.write_bytes(b"\xff\xfe\x00")
-    valid_path = tmp_path / "valid.csv"
-    valid_path.write_text(
-        "date,description,amount,source,category,subcategory\n"
-        "2026-01-01,Coffee,-4.50,unknown,food,out\n",
-        encoding="utf-8",
-    )
-    digest = "8" * 64
-
-    with database.session() as session:
-        service = ImportService(100)
-        with pytest.raises(Problem):
-            service.stage_file(
-                session, session.merge(account), failed_path, failed_path.name, digest
-            )
-        failed = session.scalar(select(ImportBatch).where(ImportBatch.file_sha256 == digest))
-
-        retried = service.stage_file(
-            session, session.merge(account), valid_path, valid_path.name, digest
-        )
-
-        assert retried.id == failed.id
-        assert retried.status == BatchStatus.READY
-        assert retried.total_rows == 1
-        assert not failed_path.exists()
-        assert session.scalar(select(func.count(ImportBatch.id))) == 1
-
-
-def test_file_uniqueness_race_returns_winning_batch(
-    tmp_path: Path,
-    database: Database,
-    account: SourceAccount,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    path = tmp_path / "race.csv"
-    path.write_text("date,description,amount\n2026-01-01,Coffee,-1\n", encoding="utf-8")
-    digest = "7" * 64
-    with database.session() as session:
-        merged_account = session.merge(account)
-        winner = _batch(session, merged_account, "7")
-        winner.file_sha256 = digest
-        session.commit()
-        service = ImportService(100)
-        original_lookup = service._active_batch
-        lookup_count = 0
-
-        def stale_then_current(*args):
-            nonlocal lookup_count
-            lookup_count += 1
-            return None if lookup_count == 1 else original_lookup(*args)
-
-        monkeypatch.setattr(service, "_active_batch", stale_then_current)
-        with pytest.raises(Problem) as error:
-            service.stage_file(session, merged_account, path, path.name, digest)
-
-        assert isinstance(error.value.__cause__, IntegrityError)
-        assert error.value.body.code == "duplicate_file"
-        assert error.value.body.details == {"batch_id": winner.id, "status": "READY"}
-
-
 def test_manual_row_limit_and_taxonomy_are_atomic(
-    database: Database, account: SourceAccount
+    database: Database, account: Account, tmp_path: Path
 ) -> None:
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "food"))
         category.is_active = False
         session.commit()
-        service = ImportService(1)
+        service = ImportService(1, tmp_path)
         row = {
             "transaction_date": "2026-01-01",
             "description": "Coffee",
@@ -292,7 +270,7 @@ def test_manual_row_limit_and_taxonomy_are_atomic(
 
 
 def test_repaired_parse_fields_are_revalidated_and_refingerprinted(
-    database: Database, account: SourceAccount
+    database: Database, account: Account, tmp_path: Path
 ) -> None:
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "food"))
@@ -309,9 +287,10 @@ def test_repaired_parse_fields_are_revalidated_and_refingerprinted(
         session.add(row)
         session.commit()
 
-        ImportService(100).update_rows(
+        ImportService(100, tmp_path).update_rows(
             session,
             batch,
+            batch.revision,
             [
                 {
                     "id": row.id,
@@ -332,7 +311,9 @@ def test_repaired_parse_fields_are_revalidated_and_refingerprinted(
         assert row.disposition == StagedDisposition.INCLUDE
 
 
-def test_staged_edits_reject_inactive_taxonomy(database: Database, account: SourceAccount) -> None:
+def test_staged_edits_reject_inactive_taxonomy(
+    database: Database, account: Account, tmp_path: Path
+) -> None:
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "food"))
         batch = _batch(session, session.merge(account))
@@ -343,9 +324,10 @@ def test_staged_edits_reject_inactive_taxonomy(database: Database, account: Sour
         session.commit()
 
         with pytest.raises(Problem) as error:
-            ImportService(100).update_rows(
+            ImportService(100, tmp_path).update_rows(
                 session,
                 batch,
+                batch.revision,
                 [{"id": row.id, "expected_revision": 1, "description": "Changed"}],
             )
 
@@ -355,7 +337,9 @@ def test_staged_edits_reject_inactive_taxonomy(database: Database, account: Sour
         assert row.revision == 1
 
 
-def test_stale_taxonomy_rule_is_skipped(database: Database, account: SourceAccount) -> None:
+def test_stale_taxonomy_rule_is_skipped(
+    database: Database, account: Account, tmp_path: Path
+) -> None:
     with database.session() as session:
         category = session.scalar(select(Category).where(Category.slug == "food"))
         session.add(
@@ -369,7 +353,7 @@ def test_stale_taxonomy_rule_is_skipped(database: Database, account: SourceAccou
         category.is_active = False
         session.commit()
 
-        batch = ImportService(100).stage_manual(
+        batch = ImportService(100, tmp_path).stage_manual(
             session,
             session.merge(account),
             [
@@ -401,7 +385,7 @@ def test_stale_taxonomy_rule_is_skipped(database: Database, account: SourceAccou
 )
 def test_ineligible_staged_rows_are_not_duplicate_candidates(
     database: Database,
-    account: SourceAccount,
+    account: Account,
     batch_status: BatchStatus,
     disposition: StagedDisposition,
 ) -> None:

@@ -20,7 +20,9 @@ Install Python dependencies and start the API:
 
 ```sh
 uv sync
-uv run uvicorn backend.app.asgi:app --reload --host 127.0.0.1 --port 8000
+mkdir -p "$HOME/.local/share/personal-finance-ledger/test"
+DATA_DIR="$HOME/.local/share/personal-finance-ledger/test" \
+  uv run uvicorn backend.app.asgi:app --reload --host 127.0.0.1 --port 18000
 ```
 
 In another terminal, install frontend dependencies and start Vite:
@@ -31,7 +33,9 @@ npm ci
 npm run dev
 ```
 
-Vite proxies `/api` and `/health` to the backend on port 8000.
+Vite proxies `/api` and `/health` to the isolated test backend on port `18000` by default.
+Set `VITE_API_PROXY_TARGET` to use another target. Do not point routine frontend development
+at production.
 
 ## Tests
 
@@ -46,7 +50,8 @@ After committed transactions contain reviewed category labels, train the local a
 tagger with:
 
 ```sh
-uv run python -m backend.app.cli train-model
+DATA_DIR="$HOME/.local/share/personal-finance-ledger/test" \
+  uv run python -m backend.app.cli train-model
 ```
 
 The default minimum confidence is `0.70` for categories and `0.80` for subcategories.
@@ -58,6 +63,16 @@ valid model is active or a prediction is below its required threshold.
 Model files use joblib's pickle-based format. Load only artifacts created locally by this
 application or restored from a trusted backup. Never place artifacts from untrusted sources
 in the models directory.
+
+## Optional OpenAI Mapping
+
+OpenAI-assisted mapping is disabled by default. To enable the server-side boundary, set
+`OPENAI_MAPPING_ENABLED=true` and `OPENAI_API_KEY` in the external environment file; keep the key out of the browser,
+logs, screenshots, and source control. Only headers, local type information, and at most 12
+deterministically selected rows of allowlisted or tokenized values are sent. Imports always
+retain a manual mapping fallback. Configure the provider account for the lowest available
+retention and data-use setting before enabling it. Also set `ALLOWED_HOSTS` to the exact LAN or
+reverse-proxy hostnames and `ALLOWED_ORIGINS` to the full browser origins used to open the app.
 
 ## Portfolio Quotes
 
@@ -71,20 +86,34 @@ For supported London, Amsterdam, and Xetra holdings, **Update history** backfill
 completed months from Yahoo Finance and converts each month-end close with the corresponding
 ECB reference rate. Re-running history updates only missing months.
 
-## Production Quick Start
+## Environments
 
 ```sh
-cp .env.example .env
-# Edit FINANCE_DATA_PATH and FINANCE_HOST_PORT in .env.
-docker compose build
-docker compose up -d
-docker compose ps
+mkdir -p "$HOME/.config/personal-finance-ledger"
+cp environments/main.env.example "$HOME/.config/personal-finance-ledger/main.env"
+cp environments/test.env.example "$HOME/.config/personal-finance-ledger/test.env"
 ```
 
-On Linux and Synology, create `FINANCE_DATA_PATH` first and grant UID/GID `10001:10001` access. The service is available at `http://<host>:<FINANCE_HOST_PORT>`.
+The current branch selects the environment:
 
-See the [Synology deployment runbook](docs/deployment/synology.md), [historical data migration](docs/deployment/migration.md), and [backup and restore guide](docs/deployment/backup-restore.md).
+```sh
+git switch main
+./scripts/finance.sh start   # production, port 8000
+
+git switch test
+./scripts/finance.sh start   # synthetic test data, port 18000
+./scripts/finance.sh reset   # restore deterministic test data
+```
+
+`FINANCE_DATA_PATH` is required and points outside the repository. `backup` is available only
+on `main`; `reset` is available only on `test`.
+
+See the [Synology deployment runbook](docs/deployment/synology.md), [tagging model training](docs/deployment/migration.md),
+and the [backup and restore guide](docs/deployment/backup-restore.md).
 
 ## Privacy
 
-Repository `data/`, SQLite files, uploads, backups, model artifacts, `.env`, and `test_db.py` are excluded from Git and the Docker build context. Do not add personal CSV files or credentials to the image, Git history, logs, or issue reports.
+Repository `data/`, SQLite files, uploads, backups, model artifacts, local environment files,
+and `test_db.py` are excluded from Git and the Docker build context. Host configuration belongs
+under `$HOME/.config/personal-finance-ledger` by default. Do not add personal CSV files or
+credentials to the image, Git history, logs, or issue reports.

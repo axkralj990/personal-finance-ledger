@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import (
+    DDL,
     JSON,
     Boolean,
     CheckConstraint,
@@ -20,9 +21,12 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from backend.app.currencies import ISO_CURRENCY_CODES
 
 
 def new_id() -> str:
@@ -33,16 +37,10 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class Provider(enum.StrEnum):
-    LEGACY = "LEGACY"
-    REVOLUT = "REVOLUT"
-    DBS = "DBS"
-    MASTERCARD = "MASTERCARD"
-    MANUAL = "MANUAL"
-
-
 class BatchStatus(enum.StrEnum):
     UPLOADED = "UPLOADED"
+    AWAITING_MAPPING = "AWAITING_MAPPING"
+    STAGING = "STAGING"
     PARSED = "PARSED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
     READY = "READY"
@@ -54,9 +52,6 @@ class BatchStatus(enum.StrEnum):
 class TransactionKind(enum.StrEnum):
     EXPENSE = "EXPENSE"
     INCOME = "INCOME"
-    REFUND = "REFUND"
-    FEE = "FEE"
-    TRANSFER = "TRANSFER"
 
 
 class DuplicateStatus(enum.StrEnum):
@@ -76,7 +71,6 @@ class StagedDisposition(enum.StrEnum):
 
 class RuleScope(enum.StrEnum):
     GLOBAL = "GLOBAL"
-    PROVIDER = "PROVIDER"
     ACCOUNT = "ACCOUNT"
 
 
@@ -100,6 +94,30 @@ class QuoteInterval(enum.StrEnum):
     MONTHLY = "MONTHLY"
 
 
+class ImportExecutionPlanKind(enum.StrEnum):
+    GUIDED_MAPPING = "GUIDED_MAPPING"
+    ADAPTER_PROFILE = "ADAPTER_PROFILE"
+
+
+class ImportMappingTemplateOrigin(enum.StrEnum):
+    PREDEFINED = "PREDEFINED"
+    LLM_CONFIRMED = "LLM_CONFIRMED"
+    MANUAL = "MANUAL"
+
+
+class ImportMappingSuggestionOutcome(enum.StrEnum):
+    SUCCEEDED = "SUCCEEDED"
+    AUTHENTICATION_ERROR = "AUTHENTICATION_ERROR"
+    PERMISSION_ERROR = "PERMISSION_ERROR"
+    CONNECTION_ERROR = "CONNECTION_ERROR"
+    TIMEOUT = "TIMEOUT"
+    RATE_LIMITED = "RATE_LIMITED"
+    REFUSED = "REFUSED"
+    PROVIDER_ERROR = "PROVIDER_ERROR"
+    INVALID_OUTPUT = "INVALID_OUTPUT"
+    STALE = "STALE"
+
+
 enum_options = {"native_enum": False, "create_constraint": True, "validate_strings": True}
 
 
@@ -107,17 +125,22 @@ class Base(DeclarativeBase):
     pass
 
 
-class SourceAccount(Base):
-    __tablename__ = "source_accounts"
+class Account(Base):
+    __tablename__ = "accounts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    provider: Mapped[Provider] = mapped_column(Enum(Provider, **enum_options), index=True)
-    display_name: Mapped[str] = mapped_column(String(120), unique=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
     default_currency: Mapped[str] = mapped_column(String(3))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
-    __table_args__ = (CheckConstraint("length(default_currency) = 3"),)
+    __table_args__ = (
+        CheckConstraint(
+            f"default_currency IN ({', '.join(repr(code) for code in sorted(ISO_CURRENCY_CODES))})",
+            name="ck_accounts_default_currency",
+        ),
+    )
 
 
 class Category(Base):
@@ -160,12 +183,34 @@ class ImportBatch(Base):
     __tablename__ = "import_batches"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    source_account_id: Mapped[str] = mapped_column(ForeignKey("source_accounts.id"), index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
     original_filename: Mapped[str] = mapped_column(String(255))
     retained_path: Mapped[str | None] = mapped_column(String(1024))
     file_sha256: Mapped[str] = mapped_column(String(64))
     parser_version: Mapped[str] = mapped_column(String(40))
     status: Mapped[BatchStatus] = mapped_column(Enum(BatchStatus, **enum_options), index=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
+    inspection_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, server_default=text("'{}'")
+    )
+    inspection_version: Mapped[str | None] = mapped_column(String(40))
+    structural_signature: Mapped[str | None] = mapped_column(String(64))
+    mapping_revision: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    current_mapping_origin: Mapped[ImportMappingTemplateOrigin | None] = mapped_column(
+        Enum(ImportMappingTemplateOrigin, **enum_options)
+    )
+    current_profile_id: Mapped[str | None] = mapped_column(String(120))
+    current_profile_version: Mapped[str | None] = mapped_column(String(40))
+    current_provider: Mapped[str | None] = mapped_column(String(10))
+    current_fingerprint_algorithm: Mapped[str | None] = mapped_column(String(80))
+    current_fingerprint_version: Mapped[str | None] = mapped_column(String(40))
+    current_mapping_diagnostics: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default=text("'[]'")
+    )
+    source_mapping_template_id: Mapped[str | None] = mapped_column(
+        ForeignKey("import_mapping_templates.id", ondelete="RESTRICT")
+    )
+    source_mapping_template_version_id: Mapped[str | None] = mapped_column(String(36))
     total_rows: Mapped[int] = mapped_column(Integer, default=0)
     included_rows: Mapped[int] = mapped_column(Integer, default=0)
     ignored_rows: Mapped[int] = mapped_column(Integer, default=0)
@@ -174,19 +219,231 @@ class ImportBatch(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    account: Mapped[SourceAccount] = relationship()
+    account: Mapped[Account] = relationship()
     staged_rows: Mapped[list[StagedTransaction]] = relationship(
         back_populates="batch", cascade="all, delete-orphan"
     )
+    execution_plans: Mapped[list[ImportBatchExecutionPlan]] = relationship(
+        back_populates="batch",
+        order_by="ImportBatchExecutionPlan.mapping_revision",
+    )
+    suggestion_attempts: Mapped[list[ImportMappingSuggestionAttempt]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
+    source_mapping_template: Mapped[ImportMappingTemplate | None] = relationship(
+        foreign_keys=[source_mapping_template_id]
+    )
+    source_mapping_template_version: Mapped[ImportMappingTemplateVersion | None] = relationship(
+        foreign_keys=[source_mapping_template_version_id, source_mapping_template_id],
+        overlaps="source_mapping_template",
+    )
 
     __table_args__ = (
+        CheckConstraint("revision >= 1", name="ck_import_batches_revision"),
+        CheckConstraint("mapping_revision >= 0", name="ck_import_batches_mapping_revision"),
+        CheckConstraint(
+            "(current_mapping_origin IS NULL AND "
+            "current_profile_id IS NULL AND current_profile_version IS NULL AND "
+            "current_provider IS NULL AND current_fingerprint_algorithm IS NULL AND "
+            "current_fingerprint_version IS NULL AND source_mapping_template_id IS NULL AND "
+            "source_mapping_template_version_id IS NULL) OR "
+            "(mapping_revision >= 1 AND current_mapping_origin IS NOT NULL AND "
+            "current_fingerprint_algorithm IS NOT NULL AND "
+            "current_fingerprint_version IS NOT NULL AND "
+            "((current_profile_id IS NULL AND current_profile_version IS NULL AND "
+            "current_provider IS NULL) OR (current_profile_id IS NOT NULL AND "
+            "current_profile_version IS NOT NULL AND current_provider IS NOT NULL)))",
+            name="ck_import_batches_current_mapping",
+        ),
+        CheckConstraint(
+            "(source_mapping_template_id IS NULL AND "
+            "source_mapping_template_version_id IS NULL) OR "
+            "(source_mapping_template_id IS NOT NULL AND "
+            "source_mapping_template_version_id IS NOT NULL)",
+            name="ck_import_batches_source_template",
+        ),
+        ForeignKeyConstraint(
+            ["source_mapping_template_version_id", "source_mapping_template_id"],
+            [
+                "import_mapping_template_versions.id",
+                "import_mapping_template_versions.template_id",
+            ],
+            name="fk_import_batch_mapping_template_version",
+            ondelete="RESTRICT",
+        ),
         Index(
             "uq_import_batch_file_active",
-            "source_account_id",
+            "account_id",
             "file_sha256",
             unique=True,
             sqlite_where=text("status != 'DELETED'"),
         ),
+    )
+
+
+class ImportMappingTemplate(Base):
+    __tablename__ = "import_mapping_templates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120))
+    structural_signature: Mapped[str] = mapped_column(String(64))
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="RESTRICT"))
+    origin: Mapped[ImportMappingTemplateOrigin] = mapped_column(
+        Enum(ImportMappingTemplateOrigin, **enum_options)
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    account: Mapped[Account | None] = relationship()
+    versions: Mapped[list[ImportMappingTemplateVersion]] = relationship(
+        back_populates="template",
+        order_by="ImportMappingTemplateVersion.version",
+    )
+
+    __table_args__ = (
+        CheckConstraint("revision >= 1", name="ck_import_mapping_templates_revision"),
+        CheckConstraint(
+            "origin != 'PREDEFINED' OR is_active = 1",
+            name="ck_import_mapping_templates_predefined_active",
+        ),
+        Index(
+            "ix_import_mapping_templates_match",
+            "structural_signature",
+            "account_id",
+            "is_active",
+        ),
+        Index(
+            "uq_import_mapping_templates_global_name",
+            "name",
+            unique=True,
+            sqlite_where=text("account_id IS NULL"),
+        ),
+        Index(
+            "uq_import_mapping_templates_account_name",
+            "account_id",
+            "name",
+            unique=True,
+            sqlite_where=text("account_id IS NOT NULL"),
+        ),
+    )
+
+
+class ImportMappingTemplateVersion(Base):
+    __tablename__ = "import_mapping_template_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    template_id: Mapped[str] = mapped_column(
+        ForeignKey("import_mapping_templates.id", ondelete="CASCADE")
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    execution_plan_kind: Mapped[ImportExecutionPlanKind] = mapped_column(
+        Enum(ImportExecutionPlanKind, **enum_options)
+    )
+    execution_plan_schema_version: Mapped[str] = mapped_column(String(40))
+    execution_plan_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    template: Mapped[ImportMappingTemplate] = relationship(back_populates="versions")
+
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_import_mapping_template_versions_version"),
+        UniqueConstraint("template_id", "version", name="uq_import_mapping_template_version"),
+        UniqueConstraint("id", "template_id", name="uq_import_mapping_template_version_owner"),
+    )
+
+
+class ImportBatchExecutionPlan(Base):
+    __tablename__ = "import_batch_execution_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id", ondelete="CASCADE"))
+    mapping_revision: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[ImportExecutionPlanKind] = mapped_column(
+        Enum(ImportExecutionPlanKind, **enum_options)
+    )
+    schema_version: Mapped[str] = mapped_column(String(40))
+    plan_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    origin: Mapped[ImportMappingTemplateOrigin] = mapped_column(
+        Enum(ImportMappingTemplateOrigin, **enum_options)
+    )
+    source_template_id: Mapped[str | None] = mapped_column(
+        ForeignKey("import_mapping_templates.id", ondelete="RESTRICT")
+    )
+    source_template_version_id: Mapped[str | None] = mapped_column(String(36))
+    profile_id: Mapped[str | None] = mapped_column(String(120))
+    profile_version: Mapped[str | None] = mapped_column(String(40))
+    provider: Mapped[str | None] = mapped_column(String(10))
+    fingerprint_algorithm: Mapped[str] = mapped_column(String(80))
+    fingerprint_version: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    batch: Mapped[ImportBatch] = relationship(back_populates="execution_plans")
+    source_template: Mapped[ImportMappingTemplate | None] = relationship(
+        foreign_keys=[source_template_id]
+    )
+    source_template_version: Mapped[ImportMappingTemplateVersion | None] = relationship(
+        foreign_keys=[source_template_version_id, source_template_id],
+        overlaps="source_template",
+    )
+
+    __table_args__ = (
+        CheckConstraint("mapping_revision >= 1", name="ck_import_execution_plans_revision"),
+        CheckConstraint(
+            "(source_template_id IS NULL AND source_template_version_id IS NULL) OR "
+            "(source_template_id IS NOT NULL AND source_template_version_id IS NOT NULL)",
+            name="ck_import_execution_plans_source_template",
+        ),
+        CheckConstraint(
+            "(kind = 'GUIDED_MAPPING' AND profile_id IS NULL AND "
+            "profile_version IS NULL AND provider IS NULL) OR "
+            "(kind = 'ADAPTER_PROFILE' AND profile_id IS NOT NULL AND "
+            "profile_version IS NOT NULL AND provider IS NOT NULL)",
+            name="ck_import_execution_plans_kind",
+        ),
+        ForeignKeyConstraint(
+            ["source_template_version_id", "source_template_id"],
+            ["import_mapping_template_versions.id", "import_mapping_template_versions.template_id"],
+            name="fk_import_execution_plan_template_version",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("batch_id", "mapping_revision", name="uq_import_batch_execution_plan"),
+    )
+
+
+class ImportMappingSuggestionAttempt(Base):
+    __tablename__ = "import_mapping_suggestion_attempts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id", ondelete="CASCADE"))
+    batch_revision: Mapped[int] = mapped_column(Integer)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    model_name: Mapped[str] = mapped_column(String(120))
+    provider_request_id: Mapped[str | None] = mapped_column(String(255))
+    prompt_version: Mapped[str] = mapped_column(String(40))
+    schema_version: Mapped[str] = mapped_column(String(40))
+    payload_sha256: Mapped[str] = mapped_column(String(64))
+    consented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    outcome: Mapped[ImportMappingSuggestionOutcome] = mapped_column(
+        Enum(ImportMappingSuggestionOutcome, **enum_options)
+    )
+    execution_plan_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    error_class: Mapped[str | None] = mapped_column(String(160))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    batch: Mapped[ImportBatch] = relationship(back_populates="suggestion_attempts")
+
+    __table_args__ = (
+        CheckConstraint("batch_revision >= 1", name="ck_import_suggestions_batch_revision"),
+        CheckConstraint("attempt_number >= 1", name="ck_import_suggestions_attempt_number"),
+        CheckConstraint("duration_ms >= 0", name="ck_import_suggestions_duration"),
+        CheckConstraint("length(payload_sha256) = 64", name="ck_import_suggestions_payload_sha256"),
+        UniqueConstraint("batch_id", "attempt_number", name="uq_import_mapping_suggestion_attempt"),
+        Index("ix_import_mapping_suggestions_batch_created", "batch_id", "created_at"),
     )
 
 
@@ -195,7 +452,7 @@ class StagedTransaction(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id", ondelete="CASCADE"))
-    ledger_account_id: Mapped[str] = mapped_column(ForeignKey("source_accounts.id"), index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
     row_number: Mapped[int] = mapped_column(Integer)
     raw_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     transaction_date: Mapped[date | None] = mapped_column(Date)
@@ -229,7 +486,7 @@ class StagedTransaction(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     batch: Mapped[ImportBatch] = relationship(back_populates="staged_rows")
-    ledger_account: Mapped[SourceAccount] = relationship()
+    account: Mapped[Account] = relationship()
 
     __table_args__ = (
         UniqueConstraint("batch_id", "row_number"),
@@ -246,7 +503,7 @@ class Transaction(Base):
     __tablename__ = "transactions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    source_account_id: Mapped[str] = mapped_column(ForeignKey("source_accounts.id"), index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
     transaction_date: Mapped[date] = mapped_column(Date, index=True)
     transaction_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     description: Mapped[str] = mapped_column(Text)
@@ -270,13 +527,17 @@ class Transaction(Base):
     corrected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     excluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    account: Mapped[SourceAccount] = relationship()
+    account: Mapped[Account] = relationship()
     category: Mapped[Category | None] = relationship(foreign_keys=[category_id])
     subcategory: Mapped[Subcategory | None] = relationship(foreign_keys=[subcategory_id])
 
     __table_args__ = (
-        UniqueConstraint("source_account_id", "row_fingerprint"),
+        UniqueConstraint("account_id", "row_fingerprint"),
         CheckConstraint("length(currency) = 3"),
+        CheckConstraint(
+            "(amount_minor > 0 AND kind = 'INCOME') OR (amount_minor < 0 AND kind = 'EXPENSE')",
+            name="ck_transactions_amount_kind",
+        ),
         CheckConstraint("subcategory_id IS NULL OR category_id IS NOT NULL"),
         ForeignKeyConstraint(
             ["subcategory_id", "category_id"],
@@ -285,7 +546,7 @@ class Transaction(Base):
         ),
         Index(
             "uq_transaction_native_id",
-            "source_account_id",
+            "account_id",
             "source_native_id",
             unique=True,
             sqlite_where=text("source_native_id IS NOT NULL"),
@@ -299,8 +560,7 @@ class TagRule(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     normalized_description: Mapped[str] = mapped_column(Text)
     scope: Mapped[RuleScope] = mapped_column(Enum(RuleScope, **enum_options))
-    source_account_id: Mapped[str | None] = mapped_column(ForeignKey("source_accounts.id"))
-    provider: Mapped[Provider | None] = mapped_column(Enum(Provider, **enum_options))
+    account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id"))
     category_id: Mapped[str] = mapped_column(ForeignKey("categories.id"))
     subcategory_id: Mapped[str | None] = mapped_column(ForeignKey("subcategories.id"))
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -314,9 +574,8 @@ class TagRule(Base):
             name="fk_rule_taxonomy_parent",
         ),
         CheckConstraint(
-            "(scope = 'GLOBAL' AND source_account_id IS NULL AND provider IS NULL) OR "
-            "(scope = 'PROVIDER' AND source_account_id IS NULL AND provider IS NOT NULL) OR "
-            "(scope = 'ACCOUNT' AND source_account_id IS NOT NULL AND provider IS NULL)",
+            "(scope = 'GLOBAL' AND account_id IS NULL) OR "
+            "(scope = 'ACCOUNT' AND account_id IS NOT NULL)",
             name="ck_tag_rule_scope",
         ),
     )
@@ -526,3 +785,57 @@ class AssetEvent(Base):
         ),
         Index("ix_asset_events_asset_id_created_at", "asset_id", "created_at"),
     )
+
+
+_SQLITE_IMPORT_TRIGGERS = (
+    "CREATE TRIGGER prevent_import_mapping_template_version_update "
+    "BEFORE UPDATE ON import_mapping_template_versions "
+    "BEGIN SELECT RAISE(ABORT, 'import mapping template versions are immutable'); END",
+    "CREATE TRIGGER prevent_import_mapping_template_version_delete "
+    "BEFORE DELETE ON import_mapping_template_versions "
+    "BEGIN SELECT RAISE(ABORT, 'import mapping template versions are retained'); END",
+    "CREATE TRIGGER prevent_import_batch_execution_plan_update "
+    "BEFORE UPDATE ON import_batch_execution_plans "
+    "BEGIN SELECT RAISE(ABORT, 'import batch execution plans are immutable'); END",
+    "CREATE TRIGGER prevent_import_batch_execution_plan_delete "
+    "BEFORE DELETE ON import_batch_execution_plans "
+    "BEGIN SELECT RAISE(ABORT, 'import batch execution plans are retained'); END",
+    "CREATE TRIGGER validate_import_batch_current_mapping_update "
+    "BEFORE UPDATE OF mapping_revision, current_mapping_origin, current_profile_id, "
+    "current_profile_version, current_provider, current_fingerprint_algorithm, "
+    "current_fingerprint_version, source_mapping_template_id, "
+    "source_mapping_template_version_id ON import_batches "
+    "WHEN (NEW.mapping_revision >= 1 AND NOT EXISTS ("
+    "SELECT 1 FROM import_batch_execution_plans AS plan "
+    "WHERE plan.batch_id = NEW.id AND plan.mapping_revision = NEW.mapping_revision)) OR "
+    "(NEW.current_mapping_origin IS NOT NULL AND EXISTS ("
+    "SELECT 1 FROM import_batch_execution_plans AS plan "
+    "WHERE plan.batch_id = NEW.id AND plan.mapping_revision = NEW.mapping_revision AND ("
+    "plan.origin IS NOT NEW.current_mapping_origin OR "
+    "plan.profile_id IS NOT NEW.current_profile_id OR "
+    "plan.profile_version IS NOT NEW.current_profile_version OR "
+    "plan.provider IS NOT NEW.current_provider OR "
+    "plan.fingerprint_algorithm IS NOT NEW.current_fingerprint_algorithm OR "
+    "plan.fingerprint_version IS NOT NEW.current_fingerprint_version OR "
+    "plan.source_template_id IS NOT NEW.source_mapping_template_id OR "
+    "plan.source_template_version_id IS NOT NEW.source_mapping_template_version_id))) "
+    "BEGIN SELECT RAISE(ABORT, 'current mapping does not match execution plan'); END",
+    "CREATE TRIGGER validate_import_batch_execution_plan_insert "
+    "BEFORE INSERT ON import_batch_execution_plans "
+    "WHEN NOT EXISTS (SELECT 1 FROM import_batches AS batch WHERE batch.id = NEW.batch_id "
+    "AND NEW.mapping_revision IN (batch.mapping_revision, batch.mapping_revision + 1)) OR "
+    "EXISTS (SELECT 1 FROM import_batches AS batch WHERE batch.id = NEW.batch_id "
+    "AND batch.mapping_revision = NEW.mapping_revision AND ("
+    "NEW.origin IS NOT batch.current_mapping_origin OR "
+    "NEW.profile_id IS NOT batch.current_profile_id OR "
+    "NEW.profile_version IS NOT batch.current_profile_version OR "
+    "NEW.provider IS NOT batch.current_provider OR "
+    "NEW.fingerprint_algorithm IS NOT batch.current_fingerprint_algorithm OR "
+    "NEW.fingerprint_version IS NOT batch.current_fingerprint_version OR "
+    "NEW.source_template_id IS NOT batch.source_mapping_template_id OR "
+    "NEW.source_template_version_id IS NOT batch.source_mapping_template_version_id)) "
+    "BEGIN SELECT RAISE(ABORT, 'execution plan does not match current mapping'); END",
+)
+
+for _trigger in _SQLITE_IMPORT_TRIGGERS:
+    event.listen(Base.metadata, "after_create", DDL(_trigger).execute_if(dialect="sqlite"))

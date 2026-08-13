@@ -4,7 +4,7 @@ import { transactionKindError } from "../shared/transaction-kind";
 
 export interface ManualRow {
   id: string;
-  sourceAccountId: string;
+  accountId: string;
   date: string;
   description: string;
   amount: string;
@@ -15,7 +15,7 @@ export interface ManualRow {
 
 export function manualRowError(row: ManualRow): string | null {
   const amountMinor = parseMajorAmount(row.amount);
-  if (!row.sourceAccountId || !row.date || !row.description.trim() || !row.currency || amountMinor === null) {
+  if (!row.accountId || !row.date || !row.description.trim() || !row.currency || amountMinor === null) {
     return "Complete account, date, description, amount, and currency with at most two decimal places.";
   }
   return transactionKindError(amountMinor);
@@ -25,7 +25,7 @@ export function toManualInput(row: ManualRow): ManualTransactionInput | null {
   const amountMinor = parseMajorAmount(row.amount);
   if (manualRowError(row) || amountMinor === null) return null;
   return {
-    sourceAccountId: row.sourceAccountId,
+    accountId: row.accountId,
     date: row.date,
     description: row.description.trim(),
     amountMinor,

@@ -8,11 +8,12 @@ import { categoryName, subcategoriesFor, subcategoryName, taxonomyError } from "
 
 export default function CategoriesPage() {
   const categories = useResource(() => api.taxonomy.categories(), "managed-categories");
+  const accounts = useResource(() => api.accounts.list(), "rule-accounts");
   const rules = useResource(() => api.tagRules.list(), "tag-rules");
   const [categoryDraft, setCategoryDraft] = useState("");
   const [subcategoryDraft, setSubcategoryDraft] = useState({ categoryId: "", name: "" });
   const [editing, setEditing] = useState<{ type: "category" | "subcategory"; id: string; name: string } | null>(null);
-  const [ruleDraft, setRuleDraft] = useState({ match: "", scope: "GLOBAL", provider: "", categoryId: "", subcategoryId: "" });
+  const [ruleDraft, setRuleDraft] = useState({ match: "", scope: "GLOBAL", accountId: "", categoryId: "", subcategoryId: "" });
   const [message, setMessage] = useState<{ tone: "good" | "bad"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const taxonomy = categories.data ?? [];
@@ -73,11 +74,10 @@ export default function CategoriesPage() {
     if (await perform(() => api.tagRules.create({
       match: ruleDraft.match.trim(),
       scope: ruleDraft.scope,
-      provider: ruleDraft.scope === "PROVIDER" ? ruleDraft.provider.trim().toUpperCase() : null,
-      sourceAccountId: null,
+      accountId: ruleDraft.scope === "ACCOUNT" ? ruleDraft.accountId : null,
       categoryId: ruleDraft.categoryId,
       subcategoryId: ruleDraft.subcategoryId || null,
-    }), "Exact-match rule added.")) setRuleDraft({ match: "", scope: "GLOBAL", provider: "", categoryId: "", subcategoryId: "" });
+    }), "Exact-match rule added.")) setRuleDraft({ match: "", scope: "GLOBAL", accountId: "", categoryId: "", subcategoryId: "" });
   }
 
   return (
@@ -129,14 +129,14 @@ export default function CategoriesPage() {
         <div className="section-heading"><h2>Exact-match rules</h2><p>Applied before model predictions</p></div>
          <form className="filter-bar" onSubmit={addRule}>
            <Field label="Normalized description" htmlFor="rule-match"><input id="rule-match" value={ruleDraft.match} onChange={(event) => setRuleDraft((current) => ({ ...current, match: event.target.value }))} placeholder="exact merchant description" /></Field>
-           <Field label="Scope" htmlFor="rule-scope"><select id="rule-scope" value={ruleDraft.scope} onChange={(event) => setRuleDraft((current) => ({ ...current, scope: event.target.value, provider: "" }))}><option value="GLOBAL">Global</option><option value="PROVIDER">Provider</option></select></Field>
-           {ruleDraft.scope === "PROVIDER" && <Field label="Provider" htmlFor="rule-provider"><input id="rule-provider" value={ruleDraft.provider} onChange={(event) => setRuleDraft((current) => ({ ...current, provider: event.target.value }))} placeholder="e.g. REVOLUT" /></Field>}
+            <Field label="Scope" htmlFor="rule-scope"><select id="rule-scope" value={ruleDraft.scope} onChange={(event) => setRuleDraft((current) => ({ ...current, scope: event.target.value, accountId: "" }))}><option value="GLOBAL">Global</option><option value="ACCOUNT">Account</option></select></Field>
+            {ruleDraft.scope === "ACCOUNT" && <Field label="Account" htmlFor="rule-account"><select id="rule-account" value={ruleDraft.accountId} onChange={(event) => setRuleDraft((current) => ({ ...current, accountId: event.target.value }))}><option value="">Choose account</option>{accounts.data?.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</select></Field>}
           <Field label="Category" htmlFor="rule-category"><select id="rule-category" value={ruleDraft.categoryId} onChange={(event) => setRuleDraft({ ...ruleDraft, categoryId: event.target.value, subcategoryId: "" })}><option value="">Choose category</option>{taxonomy.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
            <Field label="Subcategory" htmlFor="rule-subcategory" error={ruleError}>{(accessibility) => <select {...accessibility} id="rule-subcategory" disabled={!ruleDraft.categoryId} value={ruleDraft.subcategoryId} onChange={(event) => setRuleDraft((current) => ({ ...current, subcategoryId: event.target.value }))}><option value="">None</option>{subcategoriesFor(taxonomy, ruleDraft.categoryId || null).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</Field>
-           <div className="form-actions"><button className="button" disabled={busy || !ruleDraft.match.trim() || !ruleDraft.categoryId || (ruleDraft.scope === "PROVIDER" && !ruleDraft.provider.trim()) || Boolean(ruleError)}>Add exact rule</button></div>
+            <div className="form-actions"><button className="button" disabled={busy || !ruleDraft.match.trim() || !ruleDraft.categoryId || (ruleDraft.scope === "ACCOUNT" && !ruleDraft.accountId) || Boolean(ruleError)}>Add exact rule</button></div>
         </form>
         {rules.loading ? <LoadingState label="Loading exact-match rules" /> : rules.error ? <ErrorState error={rules.error} retry={rules.reload} /> : rules.data?.length ? rules.data.map((rule) => (
-           <div className={`rule-row ${rule.active ? "" : "inactive"}`} key={rule.id}><strong>"{rule.match}"</strong><span>{categoryName(taxonomy, rule.categoryId)} / {subcategoryName(taxonomy, rule.subcategoryId)}</span><span>{rule.provider ?? rule.scope}</span><button className="button ghost" disabled={busy} onClick={() => void perform(() => api.tagRules.patch(rule.id, { active: !rule.active }), `Rule ${rule.active ? "disabled" : "enabled"}.`)}><Power aria-hidden="true" /> {rule.active ? "Disable" : "Enable"}</button></div>
+            <div className={`rule-row ${rule.active ? "" : "inactive"}`} key={rule.id}><strong>"{rule.match}"</strong><span>{categoryName(taxonomy, rule.categoryId)} / {subcategoryName(taxonomy, rule.subcategoryId)}</span><span>{rule.accountId ? accounts.data?.find((account) => account.id === rule.accountId)?.name ?? "Account" : "Global"}</span><button className="button ghost" disabled={busy} onClick={() => void perform(() => api.tagRules.patch(rule.id, { active: !rule.active }), `Rule ${rule.active ? "disabled" : "enabled"}.`)}><Power aria-hidden="true" /> {rule.active ? "Disable" : "Enable"}</button></div>
         )) : <EmptyState title="No exact-match rules" description="Rules appear only after an explicit correction is remembered or a rule is added here." />}
       </section>
     </>

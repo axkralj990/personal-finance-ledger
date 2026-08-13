@@ -24,8 +24,8 @@ function HoldingActions({ asset, onEdit, onValue }: { asset: Asset | undefined; 
 function ValuationEvidence({ holding, asOf }: { holding: PortfolioHolding; asOf: string }) {
   if (!holding.source) return <>No source</>;
   const stale = staleQuote(holding, asOf);
-  const provider = holding.source === "TWELVE_DATA" ? "Twelve Data" : holding.source === "YAHOO_FINANCE" ? "Yahoo Finance" : null;
-  return <>{provider && <StatusBadge tone={stale ? "warn" : "good"}>{stale ? "Stale quote" : provider}</StatusBadge>}{holding.source === "MANUAL" && <StatusBadge>Manual</StatusBadge>}<small>{formatDate(holding.valuedAt)}</small></>;
+  const marketSource = holding.source === "TWELVE_DATA" ? "Twelve Data" : holding.source === "YAHOO_FINANCE" ? "Yahoo Finance" : null;
+  return <>{marketSource && <StatusBadge tone={stale ? "warn" : "good"}>{stale ? "Stale quote" : marketSource}</StatusBadge>}{holding.source === "MANUAL" && <StatusBadge>Manual</StatusBadge>}<small>{formatDate(holding.valuedAt)}</small></>;
 }
 
 function GroupEvidence({ group, asOf }: { group: HoldingGroup; asOf: string }) {

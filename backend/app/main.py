@@ -12,19 +12,25 @@ from starlette.responses import Response
 from backend.app.api import api_router
 from backend.app.config import Settings, get_settings
 from backend.app.database import Database
+from backend.app.imports.lifecycle import UniversalImportService
+from backend.app.imports.openai_mapping import OpenAIMappingBoundary
 from backend.app.portfolio.market_data import MarketDataClient
 from backend.app.problems import install_problem_handlers
-from backend.app.sources.seed import seed_source_accounts
+from backend.app.sources.seed import seed_accounts
 
 
-def create_app(settings: Settings | None = None, *, run_migrations: bool = True) -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     configured = settings or get_settings()
-    configured.data_dir.mkdir(parents=True, exist_ok=True)
     database = Database(configured.resolved_database_url)
-    if run_migrations:
+    try:
         database.migrate()
+        configured.data_dir.mkdir(parents=True, exist_ok=True)
         with database.session() as session:
-            seed_source_accounts(session)
+            seed_accounts(session)
+            UniversalImportService.recover_staging(session)
+    except Exception:
+        database.dispose()
+        raise
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -35,19 +41,29 @@ def create_app(settings: Settings | None = None, *, run_migrations: bool = True)
     application.state.settings = configured
     application.state.database = database
     application.state.market_data_client_factory = MarketDataClient
+    application.state.openai_mapping_boundary_factory = OpenAIMappingBoundary
     application.state.portfolio_signing_key = secrets.token_bytes(32)
     write_lock = asyncio.Lock()
+    application.state.sqlite_write_lock = write_lock
 
     @application.middleware("http")
     async def serialize_sqlite_writes(
         request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        if database.engine.dialect.name != "sqlite" or request.method not in {
+        external_mapping_call = request.method == "POST" and request.url.path.endswith(
+            "/mapping-suggestion"
+        )
+        serialized_method = request.method in {
             "POST",
             "PUT",
             "PATCH",
             "DELETE",
-        }:
+        }
+        if (
+            database.engine.dialect.name != "sqlite"
+            or external_mapping_call
+            or not serialized_method
+        ):
             return await call_next(request)
         async with write_lock:
             return await call_next(request)

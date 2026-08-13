@@ -113,7 +113,7 @@ export const dashboardResponse = {
   recent: [{
     id: "transaction-1", date: "2026-08-09", description: "Rail ticket", amount_minor: -4200, kind: "EXPENSE",
     category_id: "travel", category_name: "Travel", subcategory_id: "trains", subcategory_name: "Trains",
-    source_account_id: "account-1", source_account_name: "Main EUR",
+    account_id: "account-1", account_name: "Main EUR",
   }],
   quality: { transaction_count: 42, uncategorized_count: 3, category_only_count: 2 },
 };

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { BookOpen, BriefcaseBusiness, CircleDollarSign, FileInput, FolderTree, LayoutDashboard, PenLine, Wifi, WifiOff } from "lucide-react";
+import { BookOpen, BriefcaseBusiness, CircleDollarSign, FileInput, FolderTree, Landmark, LayoutDashboard, PenLine, Wifi, WifiOff } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { api } from "../api/client";
 import { useResource } from "../hooks/use-resource";
@@ -11,6 +11,7 @@ const navItems = [
   { to: "/import", label: "Import", mobileLabel: "Import", icon: FileInput },
   { to: "/manual", label: "Manual entry", mobileLabel: "Manual", icon: PenLine },
   { to: "/categories", label: "Categories", mobileLabel: "Labels", icon: FolderTree },
+  { to: "/accounts", label: "Accounts", mobileLabel: "Accounts", icon: Landmark },
 ];
 
 export function AppShell() {

@@ -1,8 +1,10 @@
 export type Identifier = string;
 
-export type TransactionKind = "EXPENSE" | "INCOME" | "REFUND" | "FEE" | "TRANSFER";
+export type TransactionKind = "EXPENSE" | "INCOME";
 export type ImportStatus =
   | "UPLOADED"
+  | "AWAITING_MAPPING"
+  | "STAGING"
   | "PARSED"
   | "NEEDS_REVIEW"
   | "READY"
@@ -18,25 +20,212 @@ export type RowDisposition =
   | "AUDIT_ONLY"
   | "COMMITTED";
 
-export interface SourceAccount {
+export interface Account {
   id: Identifier;
-  provider: string;
-  displayName: string;
+  name: string;
   defaultCurrency: string;
   active: boolean;
 }
 
+export interface AccountCreateInput {
+  name: string;
+  defaultCurrency: string;
+}
+
 export interface ImportBatch {
   id: Identifier;
-  sourceAccountId: Identifier;
+  accountId: Identifier;
   filename: string;
   status: ImportStatus;
   totalRows: number;
   validRows: number;
   needsReviewRows: number;
   duplicateRows: number;
+  includedRows: number;
   ignoredRows: number;
+  auditRows: number;
+  blockedRows: number;
   errors: string[];
+  revision: number;
+  mappingRevision: number;
+  currentMappingOrigin: MappingOrigin | null;
+  currentMapping: ImportExecutionPlan | null;
+  currentTemplateId: string | null;
+  currentTemplateVersionId: string | null;
+  mappingDiagnostics: ImportDiagnostic[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type MappingOrigin = "LLM_CONFIRMED" | "MANUAL";
+export type InferredValueType = "EMPTY" | "TEXT" | "DATE" | "TIMESTAMP" | "NUMBER" | "CURRENCY" | "MIXED";
+
+export interface ImportDiagnostic {
+  code: string;
+  message: string;
+  field: string | null;
+  rowNumber: number | null;
+  severity: "INFO" | "WARNING" | "ERROR";
+}
+
+export interface InspectedColumn {
+  id: string;
+  position: number;
+  rawLabel: string;
+  normalizedLabel: string;
+  inferredType: InferredValueType;
+}
+
+export interface InspectionSheet {
+  name: string;
+  index: number;
+  rowCount: number;
+  columnCount: number;
+  candidateHeaderRows: number[];
+}
+
+export interface SourcePreviewRow {
+  rowNumber: number;
+  values: Record<string, unknown>;
+}
+
+export interface ImportInspection {
+  batchRevision: number;
+  inspectionVersion: string;
+  executionSchemaVersion: string;
+  fileType: "CSV" | "XLS" | "XLSX";
+  encoding: string | null;
+  delimiter: string | null;
+  quoteCharacter: string | null;
+  sheets: InspectionSheet[];
+  selectedSheet: string;
+  headerRow: number;
+  dataStartRow: number;
+  dataEndRow: number;
+  rowCount: number;
+  blankRows: number[];
+  repeatedHeaderRows: number[];
+  possibleFooterRows: number[];
+  columns: InspectedColumn[];
+  previewOffset: number;
+  preview: SourcePreviewRow[];
+  structuralSignature: string;
+  diagnostics: ImportDiagnostic[];
+  proposals: MappingProposals;
+}
+
+export interface DateMappingSource {
+  sourceColumn: string;
+  format: string;
+}
+
+export interface TimestampMappingSource extends DateMappingSource {
+  timezone: string;
+}
+
+export interface NumberFormat {
+  decimalSeparator: "." | ",";
+  thousandsSeparator: string | null;
+  stripCurrencySymbols: boolean;
+  allowParentheses: boolean;
+  allowTrailingMinus: boolean;
+}
+
+export type ExpenseSignConvention = "EXPENSES_NEGATIVE" | "EXPENSES_POSITIVE";
+
+export interface UniversalMappingPlan {
+  planType: "universal";
+  schemaVersion: string;
+  transactionDate: DateMappingSource | null;
+  transactionTimestamp: TimestampMappingSource | null;
+  description: { sourceColumn: string; strip: boolean; collapseWhitespace: boolean };
+  amount:
+    | { kind: "signed"; sourceColumn: string; numberFormat: NumberFormat; signConvention: ExpenseSignConvention }
+    | { kind: "debit_credit"; debitColumn: string; creditColumn: string; numberFormat: NumberFormat; debitSourceSign: "positive" | "negative"; creditSourceSign: "positive" | "negative" };
+  currency: { kind: "source"; sourceColumn: string } | { kind: "constant"; value: string };
+  sourceNativeId: { sourceColumn: string } | null;
+  categoryHint: { sourceColumn: string } | null;
+  subcategoryHint: { sourceColumn: string } | null;
+  rowBounds: { firstRow: number | null; lastRow: number | null };
+  exactFilters: { sourceColumn: string; mode: "include" | "exclude"; values: string[] }[];
+  skipEmptyRows: boolean;
+  skipRepeatedHeaders: boolean;
+  footerRule: { sourceColumn: string; normalizedValue: string } | null;
+}
+
+export type ImportExecutionPlan = UniversalMappingPlan;
+
+export interface MappingProposal {
+  origin: MappingOrigin;
+  label: string;
+  plan: ImportExecutionPlan;
+  templateId: string | null;
+  templateVersionId: string | null;
+  scope: "ACCOUNT" | "GLOBAL" | null;
+}
+
+export interface MappingProposals {
+  templates: MappingProposal[];
+  universal: ImportExecutionPlan | null;
+}
+
+export interface ParsedPreviewRow {
+  rowNumber: number;
+  raw: Record<string, unknown>;
+  transactionDate: string | null;
+  transactionTimestamp: string | null;
+  description: string | null;
+  amountMinor: number | null;
+  currency: string | null;
+  disposition: RowDisposition;
+  errors: string[];
+}
+
+export interface MappingPreview {
+  totalRows: number;
+  rows: ParsedPreviewRow[];
+  importableRows: number;
+  errorRows: number;
+  auditRows: number;
+}
+
+export interface MappingSuggestionPayload {
+  payload: Record<string, unknown>;
+  digest: string;
+  revision: number;
+}
+
+export interface MappingConfirmation {
+  batchId: Identifier;
+  revision: number;
+  mappingRevision: number;
+  plan: ImportExecutionPlan;
+}
+
+export interface MappingSuggestion {
+  revision: number;
+  status: "suggested" | "manual_fallback";
+  plan: UniversalMappingPlan | null;
+  fallback: { code: string; message: string; retryable: boolean } | null;
+}
+
+export interface ImportMappingTemplateVersion {
+  id: Identifier;
+  version: number;
+  plan: ImportExecutionPlan;
+  createdAt: string;
+}
+
+export interface ImportMappingTemplate {
+  id: Identifier;
+  name: string;
+  structuralSignature: string;
+  accountId: Identifier | null;
+  origin: MappingOrigin;
+  active: boolean;
+  revision: number;
+  currentVersion: ImportMappingTemplateVersion;
+  versions: ImportMappingTemplateVersion[];
   createdAt: string;
   updatedAt: string;
 }
@@ -101,8 +290,7 @@ export interface TagRule {
   id: Identifier;
   match: string;
   scope: string;
-  provider: string | null;
-  sourceAccountId: Identifier | null;
+  accountId: Identifier | null;
   categoryId: Identifier;
   subcategoryId: Identifier | null;
   active: boolean;
@@ -116,13 +304,12 @@ export interface Transaction {
   amountMinor: number;
   currency: string;
   kind: TransactionKind;
-  sourceAccountId: Identifier;
-  sourceAccountName: string;
+  accountId: Identifier;
+  accountName: string;
   categoryId: Identifier | null;
   categoryName: string | null;
   subcategoryId: Identifier | null;
   subcategoryName: string | null;
-  excluded: boolean;
   importBatchId: Identifier | null;
 }
 
@@ -139,10 +326,9 @@ export interface TransactionQuery {
   currency?: string;
   dateFrom?: string;
   dateTo?: string;
-  sourceAccountId?: Identifier;
+  accountId?: Identifier;
   categoryId?: Identifier;
   search?: string;
-  includeExcluded?: boolean;
 }
 
 export interface ReportQuery {
@@ -303,8 +489,8 @@ export interface DashboardRecentTransaction {
   categoryName: string | null;
   subcategoryId: Identifier | null;
   subcategoryName: string | null;
-  sourceAccountId: Identifier;
-  sourceAccountName: string;
+  accountId: Identifier;
+  accountName: string;
 }
 
 export interface DashboardQuality {
@@ -325,7 +511,7 @@ export interface Dashboard {
 }
 
 export interface ManualTransactionInput {
-  sourceAccountId: Identifier;
+  accountId: Identifier;
   date: string;
   description: string;
   amountMinor: number;
