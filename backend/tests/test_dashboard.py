@@ -189,7 +189,8 @@ def test_dashboard_financial_semantics_prior_composition_recent_and_quality(
         "category_only_count": 2,
     }
 
-    category_ranked = dashboard["composition"]["category_ranked"]
+    spending = dashboard["composition"]["spending"]
+    category_ranked = spending["category_ranked"]
     assert [
         (item["taxonomy_id"], item["amount_minor"], item["count"]) for item in category_ranked
     ] == [
@@ -197,14 +198,30 @@ def test_dashboard_financial_semantics_prior_composition_recent_and_quality(
         (taxonomy["food"], 111, 2),
     ]
     assert category_ranked[0]["percentage"] == 90.431034
-    subcategory_ranked = dashboard["composition"]["subcategory_ranked"]
+    subcategory_ranked = spending["subcategory_ranked"]
     assert [item["taxonomy_id"] for item in subcategory_ranked] == [
         "uncategorized",
         taxonomy["groceries"],
         f"category-only:{taxonomy['food']}",
     ]
     assert subcategory_ranked[2]["name"] == "food (category only)"
-    assert all(item["partial"] for item in dashboard["composition"]["category_monthly"])
+    assert all(item["partial"] for item in spending["category_monthly"])
+
+    income = dashboard["composition"]["income"]
+    assert [
+        (item["taxonomy_id"], item["amount_minor"], item["count"])
+        for item in income["category_ranked"]
+    ] == [
+        (taxonomy["income"], 1001, 1),
+        (taxonomy["food"], 40, 1),
+    ]
+    assert income["category_ranked"][0]["percentage"] == 96.157541
+    assert [item["taxonomy_id"] for item in income["subcategory_ranked"]] == [
+        f"category-only:{taxonomy['income']}",
+        taxonomy["groceries"],
+    ]
+    assert income["subcategory_ranked"][0]["name"] == "income (category only)"
+    assert all(item["partial"] for item in income["category_monthly"])
 
     assert len(dashboard["cumulative"]) == 10
     assert dashboard["cumulative"][0] == {

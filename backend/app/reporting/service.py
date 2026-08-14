@@ -23,6 +23,7 @@ from backend.app.reporting.models import (
     AnnualMonth,
     AnnualPoint,
     BoundaryPartials,
+    CompositionBreakdown,
     CumulativePoint,
     DashboardComposition,
     DashboardFilters,
@@ -393,16 +394,41 @@ def _build_composition(
     category_names: dict[str, str],
     subcategory_names: dict[str, str],
 ) -> DashboardComposition:
+    return DashboardComposition(
+        spending=_build_composition_breakdown(
+            rows,
+            filters,
+            category_names,
+            subcategory_names,
+            lambda row: abs(row.amount_minor) if row.amount_minor < 0 else None,
+        ),
+        income=_build_composition_breakdown(
+            rows,
+            filters,
+            category_names,
+            subcategory_names,
+            lambda row: row.amount_minor if row.amount_minor > 0 else None,
+        ),
+    )
+
+
+def _build_composition_breakdown(
+    rows: list[_TransactionRow],
+    filters: DashboardFilters,
+    category_names: dict[str, str],
+    subcategory_names: dict[str, str],
+    amount_for_row: Callable[[_TransactionRow], int | None],
+) -> CompositionBreakdown:
     category_monthly: dict[tuple[str, str], _CompositionTotal] = {}
     subcategory_monthly: dict[tuple[str, str], _CompositionTotal] = {}
     category_ranked: dict[str, _CompositionTotal] = {}
     subcategory_ranked: dict[str, _CompositionTotal] = {}
 
     for row in rows:
-        if row.amount_minor >= 0:
+        amount = amount_for_row(row)
+        if amount is None:
             continue
         period = row.transaction_date.strftime("%Y-%m")
-        amount = abs(row.amount_minor)
         category_id, category_name = _category_identity(row, category_names)
         subcategory_id, subcategory_name = _subcategory_identity(
             row, category_names, subcategory_names
@@ -455,7 +481,7 @@ def _build_composition(
             )
         )
 
-    return DashboardComposition(
+    return CompositionBreakdown(
         category_monthly=monthly_items(category_monthly),
         subcategory_monthly=monthly_items(subcategory_monthly),
         category_ranked=ranked_items(category_ranked),

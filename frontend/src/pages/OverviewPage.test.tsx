@@ -9,6 +9,7 @@ import OverviewPage from "./OverviewPage";
 const categories: Category[] = [
   { id: "food", name: "Food", sortOrder: 1, active: true, subcategories: [{ id: "cafes", categoryId: "food", name: "Cafes", sortOrder: 1, active: true }] },
   { id: "travel", name: "Travel", sortOrder: 2, active: true, subcategories: [{ id: "flights", categoryId: "travel", name: "Flights", sortOrder: 1, active: true }] },
+  { id: "income", name: "Income", sortOrder: 3, active: true, subcategories: [{ id: "salary", categoryId: "income", name: "Salary", sortOrder: 1, active: true }] },
 ];
 
 function LocationProbe() {
@@ -103,6 +104,29 @@ describe("OverviewPage analytical dashboard", () => {
     expect(screen.getByRole("table", { name: "Net by calendar month and year" })).toBeInTheDocument();
   });
 
+  it("switches composition measure and level against the loaded response", async () => {
+    const user = userEvent.setup();
+    renderOverview("/?date_from=2025-08-10&date_to=2026-08-10");
+
+    const composition = await screen.findByRole("region", { name: "Composition" });
+    const measureControl = within(composition).getByLabelText("Composition measure");
+    const levelControl = within(composition).getByLabelText("Composition level");
+    expect(within(measureControl).getByRole("button", { name: "Spending" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(composition).getByText("Exact spending composition data")).toBeInTheDocument();
+
+    await user.click(within(measureControl).getByRole("button", { name: "Income" }));
+    expect(within(composition).getByText("Exact income composition data")).toBeInTheDocument();
+    const rankedIncome = within(composition).getByText("Ranked income").closest("details");
+    expect(within(rankedIncome!).getByText("€2,200.00")).toBeInTheDocument();
+
+    await user.click(within(levelControl).getByRole("button", { name: "Subcategory" }));
+    expect(within(composition).getAllByText("Salary").length).toBeGreaterThan(0);
+
+    await user.click(within(levelControl).getByRole("button", { name: "Category" }));
+    await user.click(within(rankedIncome!).getByRole("button", { name: "Income" }));
+    await waitFor(() => expect(screen.getByLabelText("Current query")).toHaveTextContent("category_id=income"));
+  });
+
   it("rejects inverted dates inline without fetching the dashboard", async () => {
     renderOverview("/?date_from=2026-08-11&date_to=2026-08-10");
 
@@ -131,9 +155,13 @@ describe("OverviewPage analytical dashboard", () => {
   });
 
   it("shows the explanatory empty model while retaining zero-safe charts and tables", async () => {
+    const user = userEvent.setup();
     const empty: Dashboard = {
       ...dashboardFixture,
-      composition: { categoryMonthly: [], subcategoryMonthly: [], categoryRanked: [], subcategoryRanked: [] },
+      composition: {
+        spending: { categoryMonthly: [], subcategoryMonthly: [], categoryRanked: [], subcategoryRanked: [] },
+        income: { categoryMonthly: [], subcategoryMonthly: [], categoryRanked: [], subcategoryRanked: [] },
+      },
       annual: [],
       cumulative: [],
       recent: [],
@@ -144,6 +172,10 @@ describe("OverviewPage analytical dashboard", () => {
 
     expect(await screen.findByText(/No transactions match these filters/)).toBeInTheDocument();
     expect(screen.getByText("No ranked spending")).toBeInTheDocument();
+    const compositionMeasure = screen.getByLabelText("Composition measure");
+    await user.click(within(compositionMeasure).getByRole("button", { name: "Income" }));
+    expect(screen.getByText("No income composition")).toBeInTheDocument();
+    expect(screen.getByText("No ranked income")).toBeInTheDocument();
     expect(screen.queryByText("Recent entries")).not.toBeInTheDocument();
     expect(screen.getAllByRole("table").length).toBeGreaterThanOrEqual(4);
   });

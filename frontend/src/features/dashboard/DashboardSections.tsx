@@ -33,6 +33,7 @@ const YEAR_COLORS = LEDGER_PALETTE;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 type FlowMeasure = "income" | "spending" | "net";
+type CompositionMeasure = Exclude<FlowMeasure, "net">;
 type FlowAggregation = "total" | "mean";
 type TotalGrain = "week" | "month" | "quarter";
 type MeanWindow = "month" | "quarter" | "year";
@@ -189,10 +190,13 @@ export function CashFlowExplorer({ data }: { data: Dashboard }) {
   );
 }
 
-export function SpendingComposition({ data, realCategoryIds, onCategoryFilter }: { data: Dashboard; realCategoryIds: Set<string>; onCategoryFilter: (id: string) => void }) {
+export function Composition({ data, realCategoryIds, onCategoryFilter }: { data: Dashboard; realCategoryIds: Set<string>; onCategoryFilter: (id: string) => void }) {
+  const [measure, setMeasure] = useState<CompositionMeasure>("spending");
   const [level, setLevel] = useState<"category" | "subcategory">("category");
-  const monthly = level === "category" ? data.composition.categoryMonthly : data.composition.subcategoryMonthly;
-  const ranked = level === "category" ? data.composition.categoryRanked : data.composition.subcategoryRanked;
+  const breakdown = data.composition[measure];
+  const monthly = level === "category" ? breakdown.categoryMonthly : breakdown.subcategoryMonthly;
+  const ranked = level === "category" ? breakdown.categoryRanked : breakdown.subcategoryRanked;
+  const measureLabel = MEASURE_LABELS[measure];
   const chart = buildCompositionChartData(
     monthly,
     ranked,
@@ -201,7 +205,11 @@ export function SpendingComposition({ data, realCategoryIds, onCategoryFilter }:
   );
   return (
     <section className="dashboard-section" aria-labelledby="composition-title">
-      <SectionHeading id="composition-title" number="02" title="Spending composition" note="Monthly spending only. Top eight taxonomy lines remain stable across the chart.">
+      <SectionHeading id="composition-title" number="02" title="Composition" note={`Monthly ${measure}. Top eight taxonomy lines remain stable across the chart.`}>
+        <div className="dashboard-toggle" aria-label="Composition measure">
+          <button type="button" aria-pressed={measure === "spending"} onClick={() => setMeasure("spending")}>Spending</button>
+          <button type="button" aria-pressed={measure === "income"} onClick={() => setMeasure("income")}>Income</button>
+        </div>
         <div className="dashboard-toggle" aria-label="Composition level">
           <button type="button" aria-pressed={level === "category"} onClick={() => setLevel("category")}>Category</button>
           <button type="button" aria-pressed={level === "subcategory"} onClick={() => setLevel("subcategory")}>Subcategory</button>
@@ -216,17 +224,17 @@ export function SpendingComposition({ data, realCategoryIds, onCategoryFilter }:
               <YAxis tickFormatter={euroAxis} tick={{ fill: MUTED, fontSize: 10 }} tickLine={false} axisLine={false} width={66} />
               <MoneyTooltip />
               <PartialReferenceLines points={chart.rows.map((row) => ({ label: String(row.period), partial: Boolean(row.partial) }))} />
-              {chart.columns.map((column) => <Bar key={column.taxonomyId} name={column.name} dataKey={column.key} stackId="spending" fill={column.color} isAnimationActive={false} />)}
+              {chart.columns.map((column) => <Bar key={column.taxonomyId} name={column.name} dataKey={column.key} stackId="composition" fill={column.color} isAnimationActive={false} />)}
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="chart-key" aria-label="Spending composition legend">{chart.columns.map((column) => <span key={column.taxonomyId}><i style={{ background: column.color }} aria-hidden="true" />{column.name}</span>)}</div>
-      </> : <EmptyState title="No spending composition" description="No expense or fee rows match the selected range and taxonomy." />}
-      <DataDisclosure label="Ranked spending">
-        {ranked.length ? <table className="data-table"><caption className="sr-only">Ranked spending by {level}</caption><thead><tr><th>Rank</th><th>{level === "category" ? "Category" : "Subcategory"}</th><th>Entries</th><th className="amount">Spending</th><th className="amount">Share</th></tr></thead><tbody>{ranked.map((item, index) => { const canFilter = level === "category" && realCategoryIds.has(item.taxonomyId); return <tr key={item.taxonomyId}><td className="num">{index + 1}</td><td>{canFilter ? <button className="table-link" type="button" onClick={() => onCategoryFilter(item.taxonomyId)}>{item.name}</button> : item.name}</td><td className="num">{item.count}</td><td className="amount">{formatMoney(item.amountMinor, EUR)}</td><td className="amount">{item.percentage.toFixed(1)}%</td></tr>; })}</tbody></table> : <EmptyState title="No ranked spending" description="No ranked spending matches the selected filters." />}
+        <div className="chart-key" aria-label={`${measureLabel} composition legend`}>{chart.columns.map((column) => <span key={column.taxonomyId}><i style={{ background: column.color }} aria-hidden="true" />{column.name}</span>)}</div>
+      </> : <EmptyState title={`No ${measure} composition`} description={`No ${measure === "income" ? "positive" : "negative"} rows match the selected range and taxonomy.`} />}
+      <DataDisclosure label={`Ranked ${measure}`}>
+        {ranked.length ? <table className="data-table"><caption className="sr-only">Ranked {measure} by {level}</caption><thead><tr><th>Rank</th><th>{level === "category" ? "Category" : "Subcategory"}</th><th>Entries</th><th className="amount">{measureLabel}</th><th className="amount">Share</th></tr></thead><tbody>{ranked.map((item, index) => { const canFilter = level === "category" && realCategoryIds.has(item.taxonomyId); return <tr key={item.taxonomyId}><td className="num">{index + 1}</td><td>{canFilter ? <button className="table-link" type="button" onClick={() => onCategoryFilter(item.taxonomyId)}>{item.name}</button> : item.name}</td><td className="num">{item.count}</td><td className="amount">{formatMoney(item.amountMinor, EUR)}</td><td className="amount">{item.percentage.toFixed(1)}%</td></tr>; })}</tbody></table> : <EmptyState title={`No ranked ${measure}`} description={`No ranked ${measure} matches the selected filters.`} />}
       </DataDisclosure>
-      <DataDisclosure label="Exact spending composition data">
-        <table className="data-table"><caption className="sr-only">Monthly spending composition by {level}</caption><thead><tr><th>Period</th>{chart.columns.map((column) => <th className="amount" key={column.taxonomyId}>{column.name}</th>)}<th>Boundary</th></tr></thead><tbody>{chart.rows.map((row) => <tr key={String(row.period)}><td>{String(row.period)}</td>{chart.columns.map((column) => <td className="amount" key={column.taxonomyId}>{formatMoney(Number(row[column.key]), EUR)}</td>)}<td>{row.partial ? "Partial" : "Complete"}</td></tr>)}</tbody></table>
+      <DataDisclosure label={`Exact ${measure} composition data`}>
+        <table className="data-table"><caption className="sr-only">Monthly {measure} composition by {level}</caption><thead><tr><th>Period</th>{chart.columns.map((column) => <th className="amount" key={column.taxonomyId}>{column.name}</th>)}<th>Boundary</th></tr></thead><tbody>{chart.rows.map((row) => <tr key={String(row.period)}><td>{String(row.period)}</td>{chart.columns.map((column) => <td className="amount" key={column.taxonomyId}>{formatMoney(Number(row[column.key]), EUR)}</td>)}<td>{row.partial ? "Partial" : "Complete"}</td></tr>)}</tbody></table>
       </DataDisclosure>
     </section>
   );

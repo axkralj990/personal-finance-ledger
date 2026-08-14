@@ -115,11 +115,17 @@ class RankedCompositionItem:
 
 
 @dataclass(frozen=True, slots=True)
-class DashboardComposition:
+class CompositionBreakdown:
     category_monthly: tuple[MonthlyCompositionItem, ...]
     subcategory_monthly: tuple[MonthlyCompositionItem, ...]
     category_ranked: tuple[RankedCompositionItem, ...]
     subcategory_ranked: tuple[RankedCompositionItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardComposition:
+    spending: CompositionBreakdown
+    income: CompositionBreakdown
 
 
 @dataclass(frozen=True, slots=True)

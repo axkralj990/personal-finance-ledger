@@ -106,11 +106,16 @@ class RankedCompositionItemRead(DashboardApiModel):
     percentage: float
 
 
-class DashboardCompositionRead(DashboardApiModel):
+class CompositionBreakdownRead(DashboardApiModel):
     category_monthly: list[MonthlyCompositionItemRead]
     subcategory_monthly: list[MonthlyCompositionItemRead]
     category_ranked: list[RankedCompositionItemRead]
     subcategory_ranked: list[RankedCompositionItemRead]
+
+
+class DashboardCompositionRead(DashboardApiModel):
+    spending: CompositionBreakdownRead
+    income: CompositionBreakdownRead
 
 
 class AnnualMonthRead(DashboardApiModel):

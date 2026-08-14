@@ -452,11 +452,16 @@ export interface DashboardRankedCompositionItem {
   percentage: number;
 }
 
-export interface DashboardComposition {
+export interface DashboardCompositionBreakdown {
   categoryMonthly: DashboardMonthlyCompositionItem[];
   subcategoryMonthly: DashboardMonthlyCompositionItem[];
   categoryRanked: DashboardRankedCompositionItem[];
   subcategoryRanked: DashboardRankedCompositionItem[];
+}
+
+export interface DashboardComposition {
+  spending: DashboardCompositionBreakdown;
+  income: DashboardCompositionBreakdown;
 }
 
 export interface DashboardAnnualMonth {
