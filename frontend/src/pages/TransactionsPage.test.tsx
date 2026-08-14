@@ -74,4 +74,43 @@ describe("TransactionsPage", () => {
       expect.objectContaining({ expectedRevision: 4, amountMinor: -1999 }),
     ));
   });
+
+  it("sorts all pages from headers and responsive controls", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api.accounts, "list").mockResolvedValue([]);
+    vi.spyOn(api.taxonomy, "categories").mockResolvedValue([]);
+    vi.spyOn(api.transactions, "currencies").mockResolvedValue(["EUR"]);
+    const list = vi.spyOn(api.transactions, "list").mockResolvedValue({
+      items: [transaction],
+      page: 1,
+      pageSize: 25,
+      total: 30,
+    });
+
+    render(<TransactionsPage />);
+    await user.click(await screen.findByRole("button", { name: "Next" }));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 })));
+
+    await user.click(await screen.findByRole("button", { name: "Amount" }));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith(expect.objectContaining({
+      page: 1,
+      sortBy: "amount",
+      sortDirection: "asc",
+    })));
+    expect(screen.getByLabelText("Sort by")).toHaveValue("amount");
+    expect(screen.getByRole("columnheader", { name: "Amount" })).toHaveAttribute("aria-sort", "ascending");
+
+    await user.click(await screen.findByRole("button", { name: "Amount" }));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith(expect.objectContaining({
+      sortBy: "amount",
+      sortDirection: "desc",
+    })));
+    expect(screen.getByLabelText("Direction")).toHaveValue("desc");
+
+    await user.selectOptions(screen.getByLabelText("Sort by"), "description");
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith(expect.objectContaining({
+      sortBy: "description",
+      sortDirection: "asc",
+    })));
+  });
 });

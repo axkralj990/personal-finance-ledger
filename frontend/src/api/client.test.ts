@@ -362,7 +362,7 @@ describe("ApiClient contract requests", () => {
     });
   });
 
-  it("does not request ignored transactions in normal transaction queries", async () => {
+  it("serializes transaction search and sorting", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         void input;
@@ -378,10 +378,14 @@ describe("ApiClient contract requests", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await new ApiClient().transactions.list({ search: "Synthetic cafe" });
+    await new ApiClient().transactions.list({
+      search: "Synthetic cafe",
+      sortBy: "amount",
+      sortDirection: "asc",
+    });
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/v1/transactions?search=Synthetic+cafe",
+      "/api/v1/transactions?search=Synthetic+cafe&sort_by=amount&sort_direction=asc",
     );
   });
 

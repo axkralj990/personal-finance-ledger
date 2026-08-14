@@ -303,6 +303,8 @@ export class ApiClient {
         account_id: query.accountId,
         category_id: query.categoryId,
         search: query.search,
+        sort_by: query.sortBy,
+        sort_direction: query.sortDirection,
       })}`, {}, mapTransactionPage),
     currencies: (): Promise<string[]> =>
       this.request(`${API_ROOT}/transactions/currencies`, {}, mapCurrencies),

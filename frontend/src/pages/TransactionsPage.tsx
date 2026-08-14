@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, MoreHorizontal } from "lucide-react";
 import { ApiProblem, api } from "../api/client";
-import type { Transaction } from "../api/types";
+import type { SortDirection, Transaction, TransactionSortField } from "../api/types";
 import { Drawer } from "../components/Drawer";
 import { EmptyState, ErrorState, Field, InlineNotice, LoadingState, PageHeader } from "../components/ui";
 import { useResource } from "../hooks/use-resource";
 import { formatDate, formatMoney, minorToMajorInput, parseMajorAmount } from "../shared/format";
 import { subcategoriesFor, taxonomyError } from "../shared/taxonomy";
 
+const sortOptions: { value: TransactionSortField; label: string }[] = [
+  { value: "date", label: "Date" },
+  { value: "description", label: "Description" },
+  { value: "account", label: "Account" },
+  { value: "category", label: "Category" },
+  { value: "amount", label: "Amount" },
+];
+
 export default function TransactionsPage() {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ currency: "", dateFrom: "", dateTo: "", accountId: "", categoryId: "", search: "" });
+  const [sort, setSort] = useState<{ sortBy: TransactionSortField; sortDirection: SortDirection }>({ sortBy: "date", sortDirection: "desc" });
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [edit, setEdit] = useState({ amount: "", categoryId: "", subcategoryId: "" });
@@ -20,9 +29,10 @@ export default function TransactionsPage() {
   const accounts = useResource(() => api.accounts.list(), "transaction-accounts");
   const categories = useResource(() => api.taxonomy.categories(), "transaction-categories");
   const currencies = useResource(() => api.transactions.currencies(), "transaction-currencies");
-  const queryKey = JSON.stringify({ ...filters, page });
+  const transactionQuery = { ...filters, ...sort, page, pageSize: 25 };
+  const queryKey = JSON.stringify({ ...filters, ...sort, page });
   const transactions = useResource(
-    () => api.transactions.list({ ...filters, page, pageSize: 25 }),
+    () => api.transactions.list(transactionQuery),
     queryKey,
   );
 
@@ -44,6 +54,28 @@ export default function TransactionsPage() {
     setPage(1);
     setFilters((current) => ({ ...current, [name]: value }));
   };
+  function selectSort(sortBy: TransactionSortField) {
+    setPage(1);
+    setSort((current) => ({
+      sortBy,
+      sortDirection: current.sortBy === sortBy && current.sortDirection === "asc" ? "desc" : "asc",
+    }));
+  }
+
+  function setSortDirection(sortDirection: SortDirection) {
+    setPage(1);
+    setSort((current) => ({ ...current, sortDirection }));
+  }
+
+  function sortButton(sortBy: TransactionSortField, label: string) {
+    const active = sort.sortBy === sortBy;
+    return (
+      <button type="button" className="sort-header" onClick={() => selectSort(sortBy)}>
+        {label}
+        {active && (sort.sortDirection === "asc" ? <ArrowUp aria-hidden="true" /> : <ArrowDown aria-hidden="true" />)}
+      </button>
+    );
+  }
   const subcategories = subcategoriesFor(categories.data ?? [], edit.categoryId || null);
   const combinationError = taxonomyError(categories.data ?? [], edit.categoryId || null, edit.subcategoryId || null);
   const parsedAmount = parseMajorAmount(edit.amount);
@@ -69,7 +101,7 @@ export default function TransactionsPage() {
     } catch (error) {
       if (error instanceof ApiProblem && error.status === 409) {
         try {
-          const currentPage = await api.transactions.list({ ...filters, page, pageSize: 25 });
+          const currentPage = await api.transactions.list(transactionQuery);
           const current = currentPage.items.find((item) => item.id === selected.id);
           if (current) openTransaction(current);
           setSaveError("This transaction changed elsewhere. Current values were reloaded; review and save again.");
@@ -132,13 +164,34 @@ export default function TransactionsPage() {
       {(accounts.loading || categories.loading) && <InlineNotice>Loading account and taxonomy filters.</InlineNotice>}
       {currencies.error && <InlineNotice tone="warn">Currency discovery is unavailable. Showing account default currencies.</InlineNotice>}
 
+      <div className="transaction-sort-controls" aria-label="Transaction sorting">
+        <Field label="Sort by" htmlFor="transaction-sort-by">
+          <select id="transaction-sort-by" value={sort.sortBy} onChange={(event) => selectSort(event.target.value as TransactionSortField)}>
+            {sortOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Direction" htmlFor="transaction-sort-direction">
+          <select id="transaction-sort-direction" value={sort.sortDirection} onChange={(event) => setSortDirection(event.target.value as SortDirection)}>
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+        </Field>
+      </div>
+
       {transactions.loading ? <LoadingState label="Reading transaction pages" /> :
         transactions.error ? <ErrorState error={transactions.error} retry={transactions.reload} /> :
         !data?.items.length ? <EmptyState title={hasFilters ? "No matching transactions" : "The ledger is empty"} description={hasFilters ? "Change or clear filters to widen the server query." : "Commit an import or manual entry to begin the ledger."} /> : (
           <>
             <div className="desktop-table">
               <table className="data-table">
-                <thead><tr><th>Date</th><th>Description</th><th>Account</th><th>Category</th><th className="amount">Amount</th><th><span className="sr-only">Actions</span></th></tr></thead>
+                <thead><tr>
+                  <th aria-sort={sort.sortBy === "date" ? sort.sortDirection === "asc" ? "ascending" : "descending" : undefined}>{sortButton("date", "Date")}</th>
+                  <th aria-sort={sort.sortBy === "description" ? sort.sortDirection === "asc" ? "ascending" : "descending" : undefined}>{sortButton("description", "Description")}</th>
+                  <th aria-sort={sort.sortBy === "account" ? sort.sortDirection === "asc" ? "ascending" : "descending" : undefined}>{sortButton("account", "Account")}</th>
+                  <th aria-sort={sort.sortBy === "category" ? sort.sortDirection === "asc" ? "ascending" : "descending" : undefined}>{sortButton("category", "Category")}</th>
+                  <th className="amount" aria-sort={sort.sortBy === "amount" ? sort.sortDirection === "asc" ? "ascending" : "descending" : undefined}>{sortButton("amount", "Amount")}</th>
+                  <th><span className="sr-only">Actions</span></th>
+                </tr></thead>
                 <tbody>{data.items.map((item) => (
                   <tr key={item.id}>
                     <td>{formatDate(item.date)}</td>

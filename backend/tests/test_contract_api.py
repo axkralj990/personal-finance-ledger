@@ -116,6 +116,32 @@ def test_fresh_database_contract_flow(app, client: TestClient) -> None:  # noqa:
     assert account_filter.status_code == 200
     assert account_filter.json()["total"] == 4
     assert account_filter.json()["items"][0]["account_name"] == "Unknown"
+    assert [item["transaction_date"] for item in account_filter.json()["items"]] == [
+        "2026-02-12",
+        "2026-02-11",
+        "2026-02-10",
+        "2026-01-10",
+    ]
+    amount_ascending_first = client.get(
+        "/api/v1/transactions",
+        params={"sort_by": "amount", "sort_direction": "asc", "page_size": 2},
+    ).json()
+    amount_ascending_second = client.get(
+        "/api/v1/transactions",
+        params={"sort_by": "amount", "sort_direction": "asc", "page": 2, "page_size": 2},
+    ).json()
+    amount_descending = client.get(
+        "/api/v1/transactions",
+        params={"sort_by": "amount", "sort_direction": "desc", "page_size": 10},
+    ).json()
+    assert [item["amount_minor"] for item in amount_ascending_first["items"]] == [-1250, -500]
+    assert [item["amount_minor"] for item in amount_ascending_second["items"]] == [-100, 3000]
+    assert [item["amount_minor"] for item in amount_descending["items"]] == [
+        3000,
+        -100,
+        -500,
+        -1250,
+    ]
     category_filter = client.get(
         "/api/v1/transactions", params={"category_id": category["id"], "page_size": 10}
     )
