@@ -168,11 +168,13 @@ def train_tagging_model(
     except TrainingError as exc:
         raise SystemExit(f"training_failed: {exc}") from exc
     print(
-        f"Model trained: version={result.model_name}, training_rows={result.training_row_count}, "
+        f"Model candidate trained: version={result.model_name}, "
+        f"training_rows={result.training_row_count}, "
         f"categories={result.category_count}, "
         f"subcategory_models={result.subcategory_model_count}, "
         f"subcategory_constants={result.subcategory_constant_count}, "
-        f"scikit_learn={result.sklearn_version}, taxonomy={result.taxonomy_version}"
+        f"scikit_learn={result.sklearn_version}, taxonomy={result.taxonomy_version}. "
+        "Review and activate it from Categories / Model training."
     )
 
 

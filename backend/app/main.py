@@ -17,6 +17,7 @@ from backend.app.imports.openai_mapping import OpenAIMappingBoundary
 from backend.app.portfolio.market_data import MarketDataClient
 from backend.app.problems import install_problem_handlers
 from backend.app.sources.seed import seed_accounts
+from backend.app.tagging.model_versions import reconcile_model_artifacts
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -26,6 +27,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         database.migrate()
         configured.data_dir.mkdir(parents=True, exist_ok=True)
         with database.session() as session:
+            reconcile_model_artifacts(session, configured.data_dir)
             seed_accounts(session)
             UniversalImportService.recover_staging(session)
     except Exception:

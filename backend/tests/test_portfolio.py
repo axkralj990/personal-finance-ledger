@@ -130,7 +130,7 @@ def test_portfolio_migration_adds_only_three_new_tables(tmp_path: Path) -> None:
     )
     with engine.connect() as connection:
         assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == (
-            "20260813_0008"
+            "20260814_0009"
         )
         provenance = connection.exec_driver_sql(
             "SELECT cost_basis_fx_source, cost_basis_fx_rate_to_eur "

@@ -98,6 +98,42 @@ TRANSACTIONS = (
         "travel",
         "plane",
     ),
+    (
+        "recurring-rent",
+        DEMO_CHECKING_ID,
+        date(2026, 2, 15),
+        "Demo recurring rent",
+        -1_000,
+        "apartment",
+        "expenses",
+    ),
+    (
+        "market",
+        DEMO_CHECKING_ID,
+        date(2026, 2, 16),
+        "Demo neighborhood market",
+        -1_000,
+        "food",
+        "groceries",
+    ),
+    (
+        "bus",
+        DEMO_CHECKING_ID,
+        date(2026, 2, 17),
+        "Demo city bus",
+        -1_000,
+        "transport",
+        "public",
+    ),
+    (
+        "weekend-trip",
+        DEMO_CHECKING_ID,
+        date(2026, 2, 18),
+        "Demo weekend trip",
+        -1_000,
+        "travel",
+        "plane",
+    ),
 )
 
 
@@ -132,6 +168,7 @@ def seed_test_data(database: Database, settings: Settings, *, reset: bool) -> Se
         _seed_imports_and_transactions(session, fixture_dir, csv_bytes, xlsx_bytes)
         _seed_portfolio(session)
 
+    _clear_model_artifacts(settings.data_dir)
     fixture_dir.mkdir(parents=True, exist_ok=True)
     (fixture_dir / "synthetic-transactions.csv").write_bytes(csv_bytes)
     (fixture_dir / "synthetic-credit-card.xlsx").write_bytes(xlsx_bytes)
@@ -181,6 +218,15 @@ def _clear_business_data(session: Session) -> None:
     session.execute(delete(Subcategory))
     session.execute(delete(Category))
     session.execute(delete(Account))
+
+
+def _clear_model_artifacts(data_dir: Path) -> None:
+    models_dir = data_dir / "models"
+    if not models_dir.is_dir():
+        return
+    for pattern in ("*.joblib", ".*.tmp"):
+        for artifact in models_dir.glob(pattern):
+            artifact.unlink(missing_ok=True)
 
 
 def _drop_immutable_import_delete_triggers(session: Session) -> None:
@@ -248,8 +294,8 @@ def _seed_imports_and_transactions(
             file_sha256=hashlib.sha256(csv_bytes).hexdigest(),
             parser_version="synthetic-v1",
             status=BatchStatus.COMMITTED,
-            total_rows=6,
-            included_rows=5,
+            total_rows=10,
+            included_rows=9,
             ignored_rows=1,
             inspection_json={"sheet_names": [], "headers": ["date", "description", "amount"]},
             inspection_version="synthetic-v1",

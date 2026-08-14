@@ -3,6 +3,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from backend.app.config import Settings
@@ -26,16 +28,24 @@ from backend.app.tagging.model import (
     _load_verified_model,
     load_inference_model,
 )
+from backend.app.tagging.model_versions import (
+    ModelLifecycleError,
+    activate_model,
+    reconcile_model_artifacts,
+    reject_candidate,
+)
 from backend.app.tagging.training import TrainingError, train_model
 
 
-def test_training_is_deterministic_and_replaces_active_model(
+def test_training_is_deterministic_and_requires_explicit_activation(
     database: Database, settings: Settings, account: Account
 ) -> None:
     with database.session() as session:
         labels = _seed_training_transactions(session, session.merge(account))
         first = train_model(session, settings.data_dir)
         first_metadata = session.get(ModelVersion, first.model_version_id)
+        assert first_metadata.is_active is False
+        activate_model(session, settings.data_dir, first.model_version_id)
         first_model = load_inference_model(first_metadata, settings.data_dir)
         first_prediction = first_model.predict(
             "SYNTHETIC ORCHARD   MARKET produce fresh", -9191, TransactionKind.EXPENSE
@@ -43,6 +53,7 @@ def test_training_is_deterministic_and_replaces_active_model(
 
         second = train_model(session, settings.data_dir)
         second_metadata = session.get(ModelVersion, second.model_version_id)
+        activate_model(session, settings.data_dir, second.model_version_id)
         second_model = load_inference_model(second_metadata, settings.data_dir)
         second_prediction = second_model.predict(
             "synthetic orchard market produce fresh", -9191, TransactionKind.EXPENSE
@@ -59,6 +70,7 @@ def test_training_is_deterministic_and_replaces_active_model(
         assert session.scalar(select(func.count(ModelVersion.id))) == 2
         active = list(session.scalars(select(ModelVersion).where(ModelVersion.is_active.is_(True))))
         assert [model.id for model in active] == [second.model_version_id]
+        assert first_metadata.retired_at is None
 
 
 def test_artifact_metadata_checksum_cache_and_hierarchy(
@@ -72,6 +84,7 @@ def test_artifact_metadata_checksum_cache_and_hierarchy(
         labels = _seed_training_transactions(session, session.merge(account))
         result = train_model(session, settings.data_dir)
         metadata = session.get(ModelVersion, result.model_version_id)
+        activate_model(session, settings.data_dir, result.model_version_id)
         artifact_path = settings.data_dir / metadata.artifact_path
 
         assert artifact_path.parent == settings.data_dir / "models"
@@ -85,6 +98,10 @@ def test_artifact_metadata_checksum_cache_and_hierarchy(
         assert metadata.training_metadata["library_versions"]["scikit_learn"]
         assert metadata.training_metadata["taxonomy_checksum"]
         assert metadata.training_metadata["model_configuration"]["random_state"] == 42
+        assert metadata.training_metadata["cross_validation"] == result.cross_validation.as_dict()
+        assert result.cross_validation.requested_folds == 5
+        assert result.cross_validation.effective_folds == 3
+        assert result.cross_validation.evaluated_row_count == result.training_row_count
         assert (
             labels["lifestyle"] in metadata.training_metadata["subcategory_unresolved_categories"]
         )
@@ -136,12 +153,13 @@ def test_low_confidence_prediction_stays_pending_with_proposal(
 ) -> None:
     with database.session() as session:
         labels = _seed_training_transactions(session, session.merge(account))
-        train_model(
+        result = train_model(
             session,
             settings.data_dir,
             category_threshold=1.0,
             subcategory_threshold=1.0,
         )
+        activate_model(session, settings.data_dir, result.model_version_id)
         batch = ImportService(100, settings.data_dir).stage_manual(
             session,
             session.merge(account),
@@ -162,7 +180,8 @@ def test_stale_or_removed_taxonomy_prevents_auto_acceptance(
 ) -> None:
     with database.session() as session:
         labels = _seed_training_transactions(session, session.merge(account))
-        train_model(session, settings.data_dir)
+        result = train_model(session, settings.data_dir)
+        activate_model(session, settings.data_dir, result.model_version_id)
         removed_subcategory = session.get(Subcategory, labels["groceries"])
         removed_subcategory.is_active = False
         session.commit()
@@ -185,7 +204,8 @@ def test_staging_after_training_auto_labels_learned_merchant(
 ) -> None:
     with database.session() as session:
         labels = _seed_training_transactions(session, session.merge(account))
-        train_model(session, settings.data_dir)
+        result = train_model(session, settings.data_dir)
+        activate_model(session, settings.data_dir, result.model_version_id)
 
         batch = ImportService(100, settings.data_dir).stage_manual(
             session,
@@ -220,6 +240,7 @@ def test_failed_artifact_verification_does_not_replace_active_model(
     with database.session() as session:
         _seed_training_transactions(session, session.merge(account))
         first = train_model(session, settings.data_dir)
+        activate_model(session, settings.data_dir, first.model_version_id)
 
         def reject_artifact(*args, **kwargs):
             raise ValueError("synthetic verification failure")
@@ -232,6 +253,155 @@ def test_failed_artifact_verification_does_not_replace_active_model(
         assert [model.id for model in active] == [first.model_version_id]
         assert session.scalar(select(func.count(ModelVersion.id))) == 1
         assert len(list((settings.data_dir / "models").glob("*.joblib"))) == 1
+
+
+def test_retraining_api_creates_candidate_then_activates_it(
+    app: FastAPI, client: TestClient, account: Account
+) -> None:
+    assert client.get("/api/v1/tagging/models/active").json() is None
+    with app.state.database.session() as session:
+        _seed_training_transactions(session, session.merge(account))
+
+    response = client.post("/api/v1/tagging/models/retrain")
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["training_row_count"] == 75
+    assert body["category_count"] == 4
+    assert body["category_threshold"] == 0.7
+    assert body["subcategory_threshold"] == 0.8
+    assert body["cross_validation"]["requested_folds"] == 5
+    assert body["cross_validation"]["effective_folds"] == 3
+    assert body["cross_validation"]["evaluated_row_count"] == 75
+    assert 0 <= body["cross_validation"]["category_accuracy"] <= 1
+    assert body["status"] == "CANDIDATE"
+    assert body["activated_at"] is None
+    overview = client.get("/api/v1/tagging/models").json()
+    assert overview["active"] is None
+    assert overview["candidate"] == body
+
+    activated = client.post(
+        f"/api/v1/tagging/models/{body['model_version_id']}/activate"
+    )
+
+    assert activated.status_code == 200
+    assert activated.json()["status"] == "ACTIVE"
+    assert client.get("/api/v1/tagging/models/active").json() == activated.json()
+
+
+def test_candidate_rejection_and_rollback_keep_artifacts_bounded(
+    database: Database, settings: Settings, account: Account
+) -> None:
+    with database.session() as session:
+        _seed_training_transactions(session, session.merge(account))
+        first = train_model(session, settings.data_dir)
+        activate_model(session, settings.data_dir, first.model_version_id)
+
+        rejected = train_model(session, settings.data_dir)
+        rejected_path = settings.data_dir / session.get(
+            ModelVersion, rejected.model_version_id
+        ).artifact_path
+        reject_candidate(session, settings.data_dir, rejected.model_version_id)
+        assert session.get(ModelVersion, rejected.model_version_id) is None
+        assert not rejected_path.exists()
+
+        second = train_model(session, settings.data_dir)
+        activate_model(session, settings.data_dir, second.model_version_id)
+        first_path = settings.data_dir / session.get(
+            ModelVersion, first.model_version_id
+        ).artifact_path
+        assert first_path.exists()
+
+        third = train_model(session, settings.data_dir)
+        activate_model(session, settings.data_dir, third.model_version_id)
+        first_metadata = session.get(ModelVersion, first.model_version_id)
+        assert first_metadata.retired_at is not None
+        assert not first_path.exists()
+        assert len(list((settings.data_dir / "models").glob("*.joblib"))) == 2
+
+        activate_model(session, settings.data_dir, second.model_version_id)
+        assert session.get(ModelVersion, second.model_version_id).is_active is True
+        assert session.get(ModelVersion, third.model_version_id).is_active is False
+
+
+def test_candidate_activation_fails_closed_for_changed_artifact_and_taxonomy(
+    database: Database, settings: Settings, account: Account
+) -> None:
+    with database.session() as session:
+        labels = _seed_training_transactions(session, session.merge(account))
+        corrupt = train_model(session, settings.data_dir)
+        corrupt_metadata = session.get(ModelVersion, corrupt.model_version_id)
+        (settings.data_dir / corrupt_metadata.artifact_path).write_bytes(b"corrupt")
+
+        with pytest.raises(ModelLifecycleError) as artifact_error:
+            activate_model(session, settings.data_dir, corrupt.model_version_id)
+        assert artifact_error.value.code == "model_artifact_invalid"
+        assert corrupt_metadata.is_active is False
+        reject_candidate(session, settings.data_dir, corrupt.model_version_id)
+
+        stale = train_model(session, settings.data_dir)
+        removed_subcategory = session.get(Subcategory, labels["groceries"])
+        removed_subcategory.is_active = False
+        session.commit()
+
+        with pytest.raises(ModelLifecycleError) as taxonomy_error:
+            activate_model(session, settings.data_dir, stale.model_version_id)
+        assert taxonomy_error.value.code == "model_taxonomy_stale"
+        assert session.get(ModelVersion, stale.model_version_id).is_active is False
+
+
+def test_api_requires_pending_candidate_decision(
+    app: FastAPI, client: TestClient, account: Account
+) -> None:
+    with app.state.database.session() as session:
+        _seed_training_transactions(session, session.merge(account))
+
+    first = client.post("/api/v1/tagging/models/retrain")
+    second = client.post("/api/v1/tagging/models/retrain")
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json()["code"] == "pending_model_candidate"
+    rejected = client.delete(
+        f"/api/v1/tagging/models/{first.json()['model_version_id']}"
+    )
+    assert rejected.status_code == 204
+    assert client.get("/api/v1/tagging/models").json()["candidate"] is None
+
+
+def test_artifact_cleanup_does_not_follow_symlinks(
+    database: Database, settings: Settings, account: Account
+) -> None:
+    with database.session() as session:
+        _seed_training_transactions(session, session.merge(account))
+        candidate = train_model(session, settings.data_dir)
+        metadata = session.get(ModelVersion, candidate.model_version_id)
+        artifact_path = settings.data_dir / metadata.artifact_path
+        protected = settings.data_dir / "protected.sqlite3"
+        protected.write_bytes(b"protected")
+        artifact_path.unlink()
+        artifact_path.symlink_to(protected)
+
+        with pytest.raises(ModelLifecycleError) as activation_error:
+            activate_model(session, settings.data_dir, candidate.model_version_id)
+        assert activation_error.value.code == "model_artifact_invalid"
+        reject_candidate(session, settings.data_dir, candidate.model_version_id)
+        assert protected.read_bytes() == b"protected"
+
+        orphan = settings.data_dir / "models" / "orphan.joblib"
+        orphan.write_bytes(b"orphan")
+        reconcile_model_artifacts(session, settings.data_dir)
+        assert not orphan.exists()
+
+
+def test_retraining_api_preserves_no_model_when_training_data_is_missing(
+    client: TestClient,
+) -> None:
+    response = client.post("/api/v1/tagging/models/retrain")
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "model_training_failed"
+    assert client.get("/api/v1/tagging/models/active").json() is None
 
 
 def _seed_training_transactions(

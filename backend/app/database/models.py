@@ -593,6 +593,7 @@ class ModelVersion(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index(
@@ -600,6 +601,14 @@ class ModelVersion(Base):
             "is_active",
             unique=True,
             sqlite_where=text("is_active = 1"),
+        ),
+        Index(
+            "uq_one_model_candidate",
+            "is_active",
+            unique=True,
+            sqlite_where=text(
+                "is_active = 0 AND activated_at IS NULL AND retired_at IS NULL"
+            ),
         ),
     )
 

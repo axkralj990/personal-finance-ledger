@@ -56,17 +56,17 @@ def test_seed_has_deterministic_aggregates_and_representative_records(
     summary = seed_test_data(database, settings, reset=True)
 
     assert summary.income_minor == 350_000
-    assert summary.spending_minor == 162_945
-    assert summary.net_minor == 187_055
-    assert summary.transactions == 7
+    assert summary.spending_minor == 166_945
+    assert summary.net_minor == 183_055
+    assert summary.transactions == 11
     with database.session() as session:
         dashboard = build_dashboard(
             session, DashboardFilters(date_from=date(2026, 1, 1), date_to=date(2026, 2, 28))
         )
         assert dashboard.summary.income.current_minor == 350_000
-        assert dashboard.summary.spending.current_minor == 162_945
-        assert dashboard.summary.net.current_minor == 187_055
-        assert dashboard.quality.transaction_count == 6
+        assert dashboard.summary.spending.current_minor == 166_945
+        assert dashboard.summary.net.current_minor == 183_055
+        assert dashboard.quality.transaction_count == 10
 
         duplicate = session.get(StagedTransaction, synthetic_id("staged:duplicate-groceries"))
         assert duplicate.duplicate_status is DuplicateStatus.EXACT
@@ -79,13 +79,13 @@ def test_seed_has_deterministic_aggregates_and_representative_records(
         assert ignored_transaction.is_excluded is True
         assert ignored_transaction.exclusion_reason == IGNORED_REASON
         assert ignored_transaction.excluded_at == FIXED_AT.replace(tzinfo=None)
-        assert session.scalar(select(func.count(Transaction.id))) == 7
+        assert session.scalar(select(func.count(Transaction.id))) == 11
         assert session.scalar(select(func.count(ImportBatch.id))) == 3
         assert {
             batch.id: (batch.total_rows, batch.included_rows, batch.ignored_rows)
             for batch in session.scalars(select(ImportBatch))
         } == {
-            CHECKING_BATCH_ID: (6, 5, 1),
+            CHECKING_BATCH_ID: (10, 9, 1),
             CREDIT_BATCH_ID: (1, 1, 0),
             DUPLICATE_BATCH_ID: (1, 0, 0),
         }
@@ -102,9 +102,9 @@ def test_seed_has_deterministic_aggregates_and_representative_records(
         transactions = client.get("/api/v1/transactions")
         recent = client.get("/api/v1/reports/recent", params={"currency": "EUR"})
         assert transactions.status_code == 200
-        assert transactions.json()["total"] == 6
+        assert transactions.json()["total"] == 10
         assert recent.status_code == 200
-        assert len(recent.json()["items"]) == 6
+        assert len(recent.json()["items"]) == 10
 
     fixture_dir = settings.data_dir / "test-data"
     assert (fixture_dir / "synthetic-transactions.csv").is_file()
@@ -115,6 +115,10 @@ def test_reset_is_idempotent(database: Database, settings: Settings) -> None:
     first = seed_test_data(database, settings, reset=True)
     first_csv = (settings.data_dir / "test-data" / "synthetic-transactions.csv").read_bytes()
     first_xlsx = (settings.data_dir / "test-data" / "synthetic-credit-card.xlsx").read_bytes()
+    models_dir = settings.data_dir / "models"
+    models_dir.mkdir()
+    orphaned_model = models_dir / "orphaned.joblib"
+    orphaned_model.write_bytes(b"orphaned")
 
     with database.session() as session:
         transaction = session.get(Transaction, synthetic_id("transaction:salary"))
@@ -185,6 +189,7 @@ def test_reset_is_idempotent(database: Database, settings: Settings) -> None:
     second = seed_test_data(database, settings, reset=True)
 
     assert second == first
+    assert not orphaned_model.exists()
     assert (
         settings.data_dir / "test-data" / "synthetic-transactions.csv"
     ).read_bytes() == first_csv
@@ -200,7 +205,7 @@ def test_reset_is_idempotent(database: Database, settings: Settings) -> None:
         assert session.get(StagedTransaction, "arbitrary-staged") is None
         assert session.get(Transaction, "arbitrary-transaction") is None
         assert session.get(TransactionDeletion, "arbitrary-deletion") is None
-        assert session.scalar(select(func.count(Transaction.id))) == 7
+        assert session.scalar(select(func.count(Transaction.id))) == 11
         assert session.scalar(select(func.count(Account.id))) == 3
         assert session.get(Account, DEMO_CHECKING_ID).created_at == FIXED_AT.replace(tzinfo=None)
         assert _business_counts(session) == {
@@ -215,12 +220,12 @@ def test_reset_is_idempotent(database: Database, settings: Settings) -> None:
             "import_mapping_template_versions": 0,
             "import_mapping_templates": 0,
             "model_versions": 0,
-            "staged_transactions": 8,
+                "staged_transactions": 12,
             "subcategories": 76,
             "tag_rules": 0,
             "transaction_deletions": 0,
             "transaction_events": 1,
-            "transactions": 7,
+                "transactions": 11,
         }
         assert session.execute(text("SELECT count(*) FROM alembic_version")).scalar_one() == 1
 
@@ -239,7 +244,7 @@ def test_cli_seed_test_data_command(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     database = Database(settings.resolved_database_url)
     try:
         with database.session() as session:
-            assert session.scalar(select(func.count(Transaction.id))) == 7
+            assert session.scalar(select(func.count(Transaction.id))) == 11
     finally:
         database.dispose()
 

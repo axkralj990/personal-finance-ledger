@@ -1,6 +1,6 @@
 import hashlib
+import json
 import uuid
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,24 +12,35 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.pipeline import FeatureUnion, Pipeline
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.database.models import Category, ModelVersion, Transaction
+from backend.app.tagging.evaluation import (
+    CrossValidationMetrics,
+    TrainingExample,
+    cross_validate_hierarchy,
+    fit_hierarchy,
+)
 from backend.app.tagging.model import (
     ARTIFACT_SCHEMA_VERSION,
     current_taxonomy,
-    model_feature,
     verify_model_artifact,
 )
 
 DEFAULT_CATEGORY_THRESHOLD = 0.70
 DEFAULT_SUBCATEGORY_THRESHOLD = 0.80
-MIN_SUBCATEGORY_CLASS_ROWS = 2
 RANDOM_STATE = 42
+DEFAULT_CROSS_VALIDATION_FOLDS = 5
+EVALUATION_SCHEMA_VERSION = "grouped-hierarchy-v1"
 
 
 class TrainingError(ValueError):
+    pass
+
+
+class PendingCandidateError(TrainingError):
     pass
 
 
@@ -44,6 +55,7 @@ class TrainingResult:
     checksum: str
     sklearn_version: str
     taxonomy_version: str
+    cross_validation: CrossValidationMetrics
 
 
 def train_model(
@@ -55,6 +67,15 @@ def train_model(
 ) -> TrainingResult:
     _validate_threshold("category", category_threshold)
     _validate_threshold("subcategory", subcategory_threshold)
+    candidate_id = session.scalar(
+        select(ModelVersion.id).where(
+            ModelVersion.is_active.is_(False),
+            ModelVersion.activated_at.is_(None),
+            ModelVersion.retired_at.is_(None),
+        )
+    )
+    if candidate_id is not None:
+        raise PendingCandidateError("a model candidate is already awaiting review")
     transactions = list(
         session.scalars(
             select(Transaction)
@@ -71,48 +92,33 @@ def train_model(
     if not transactions:
         raise TrainingError("no committed labeled transactions are available for training")
 
-    category_labels = [str(transaction.category_id) for transaction in transactions]
-    category_counts = Counter(category_labels)
-    if len(category_counts) < 2:
-        raise TrainingError("at least two category classes are required for training")
-
     taxonomy = current_taxonomy(session)
-    features = [
-        model_feature(
-            transaction.normalized_description,
-            transaction.amount_minor,
-            transaction.kind,
+    examples = [
+        TrainingExample(
+            normalized_description=transaction.normalized_description,
+            amount_minor=transaction.amount_minor,
+            kind=transaction.kind,
+            category_id=str(transaction.category_id),
+            subcategory_id=(
+                transaction.subcategory_id
+                if taxonomy.subcategory_parents.get(transaction.subcategory_id)
+                == str(transaction.category_id)
+                else None
+            ),
         )
         for transaction in transactions
     ]
-    category_model = _classifier().fit(features, category_labels)
-
-    subcategory_rows: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for transaction, feature in zip(transactions, features, strict=True):
-        subcategory_id = transaction.subcategory_id
-        category_id = str(transaction.category_id)
-        if (
-            subcategory_id is not None
-            and taxonomy.subcategory_parents.get(subcategory_id) == category_id
-        ):
-            subcategory_rows[category_id].append((feature, subcategory_id))
-
-    subcategory_models: dict[str, Any] = {}
-    subcategory_constants: dict[str, str] = {}
-    subcategory_counts: dict[str, dict[str, int]] = {}
-    unresolved_categories: list[str] = []
-    for category_id in sorted(subcategory_rows):
-        rows = subcategory_rows[category_id]
-        counts = Counter(label for _, label in rows)
-        subcategory_counts[category_id] = dict(sorted(counts.items()))
-        if len(counts) == 1:
-            subcategory_constants[category_id] = next(iter(counts))
-        elif min(counts.values()) >= MIN_SUBCATEGORY_CLASS_ROWS:
-            subcategory_models[category_id] = _classifier().fit(
-                [feature for feature, _ in rows], [label for _, label in rows]
-            )
-        else:
-            unresolved_categories.append(category_id)
+    try:
+        cross_validation = cross_validate_hierarchy(
+            examples,
+            _classifier,
+            requested_folds=DEFAULT_CROSS_VALIDATION_FOLDS,
+            category_threshold=category_threshold,
+            subcategory_threshold=subcategory_threshold,
+        )
+        hierarchy = fit_hierarchy(examples, _classifier)
+    except ValueError as exc:
+        raise TrainingError(str(exc)) from exc
 
     created_at = datetime.now(UTC)
     model_version_id = str(uuid.uuid4())
@@ -122,16 +128,20 @@ def train_model(
         "model_version_id": model_version_id,
         "created_at": created_at.isoformat(),
         "training_row_count": len(transactions),
-        "category_count": len(category_counts),
-        "category_labels": sorted(category_counts),
-        "category_training_counts": dict(sorted(category_counts.items())),
+        "category_count": len(hierarchy.category_counts),
+        "category_labels": sorted(hierarchy.category_counts),
+        "category_training_counts": hierarchy.category_counts,
         "subcategory_labels": {
-            category_id: sorted(counts) for category_id, counts in subcategory_counts.items()
+            category_id: sorted(counts)
+            for category_id, counts in hierarchy.subcategory_counts.items()
         },
-        "subcategory_training_counts": subcategory_counts,
-        "subcategory_model_count": len(subcategory_models),
-        "subcategory_constant_count": len(subcategory_constants),
-        "subcategory_unresolved_categories": unresolved_categories,
+        "subcategory_training_counts": hierarchy.subcategory_counts,
+        "subcategory_model_count": len(hierarchy.subcategory_models),
+        "subcategory_constant_count": len(hierarchy.subcategory_constants),
+        "subcategory_unresolved_categories": hierarchy.unresolved_categories,
+        "cross_validation": cross_validation.as_dict(),
+        "evaluation_schema_version": EVALUATION_SCHEMA_VERSION,
+        "training_data_checksum": _training_data_checksum(examples),
         "thresholds": {
             "category": category_threshold,
             "subcategory": subcategory_threshold,
@@ -151,19 +161,19 @@ def train_model(
             "word_ngram_range": [1, 2],
             "character_analyzer": "char_wb",
             "character_ngram_range": [3, 5],
-            "minimum_subcategory_class_rows": MIN_SUBCATEGORY_CLASS_ROWS,
+            "minimum_subcategory_class_rows": 2,
             "direction_feature": "signed_amount",
             "kind_feature": "transaction_kind",
         },
     }
     artifact = {
         "metadata": metadata,
-        "category_model": category_model,
-        "subcategory_models": subcategory_models,
-        "subcategory_constants": subcategory_constants,
+        "category_model": hierarchy.category_model,
+        "subcategory_models": hierarchy.subcategory_models,
+        "subcategory_constants": hierarchy.subcategory_constants,
     }
 
-    checksum = _activate_artifact(
+    checksum = _persist_candidate(
         session,
         data_dir,
         model_version_id,
@@ -177,12 +187,13 @@ def train_model(
         model_version_id=model_version_id,
         model_name=model_name,
         training_row_count=len(transactions),
-        category_count=len(category_counts),
-        subcategory_model_count=len(subcategory_models),
-        subcategory_constant_count=len(subcategory_constants),
+        category_count=len(hierarchy.category_counts),
+        subcategory_model_count=len(hierarchy.subcategory_models),
+        subcategory_constant_count=len(hierarchy.subcategory_constants),
         checksum=checksum,
         sklearn_version=sklearn.__version__,
         taxonomy_version=taxonomy.version,
+        cross_validation=cross_validation,
     )
 
 
@@ -227,7 +238,7 @@ def _classifier() -> Pipeline:
     )
 
 
-def _activate_artifact(
+def _persist_candidate(
     session: Session,
     data_dir: Path,
     model_version_id: str,
@@ -252,9 +263,6 @@ def _activate_artifact(
             str(metadata["taxonomy_version"]),
             metadata,
         )
-        session.execute(
-            update(ModelVersion).where(ModelVersion.is_active.is_(True)).values(is_active=False)
-        )
         session.add(
             ModelVersion(
                 id=model_version_id,
@@ -263,12 +271,28 @@ def _activate_artifact(
                 checksum=checksum,
                 training_metadata=metadata,
                 taxonomy_version=str(metadata["taxonomy_version"]),
-                is_active=True,
+                is_active=False,
                 created_at=created_at,
-                activated_at=created_at,
+                activated_at=None,
+                retired_at=None,
             )
         )
         session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        temporary_path.unlink(missing_ok=True)
+        artifact_path.unlink(missing_ok=True)
+        if session.scalar(
+            select(ModelVersion.id).where(
+                ModelVersion.is_active.is_(False),
+                ModelVersion.activated_at.is_(None),
+                ModelVersion.retired_at.is_(None),
+            )
+        ):
+            raise PendingCandidateError(
+                "a model candidate is already awaiting review"
+            ) from exc
+        raise
     except Exception:
         session.rollback()
         temporary_path.unlink(missing_ok=True)
@@ -288,3 +312,18 @@ def _file_hash(path: Path) -> str:
         while chunk := stream.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _training_data_checksum(examples: list[TrainingExample]) -> str:
+    payload = [
+        {
+            "amount_minor": example.amount_minor,
+            "category_id": example.category_id,
+            "kind": example.kind.value,
+            "normalized_description": example.normalized_description,
+            "subcategory_id": example.subcategory_id,
+        }
+        for example in examples
+    ]
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
