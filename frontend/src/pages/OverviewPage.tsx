@@ -4,9 +4,9 @@ import { api } from "../api/client";
 import type { DashboardUrlFilters } from "../features/dashboard/filters";
 import {
   CashFlowExplorer,
+  Composition,
   CumulativeCashFlow,
   KpiStrip,
-  SpendingComposition,
   YearComparison,
 } from "../features/dashboard/DashboardSections";
 import {
@@ -149,7 +149,7 @@ export default function OverviewPage() {
           {data.quality.transactionCount === 0 && <InlineNotice>No transactions match these filters. Zero-filled analytical views remain visible for the selected calendar range.</InlineNotice>}
           <KpiStrip data={data} />
           <CashFlowExplorer data={data} />
-          <SpendingComposition
+          <Composition
             data={data}
             realCategoryIds={realCategoryIds}
             onCategoryFilter={(id) => updateCategories([id])}

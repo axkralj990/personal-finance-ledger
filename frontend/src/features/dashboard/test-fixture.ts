@@ -73,24 +73,42 @@ export const dashboardResponse = {
     },
   },
   composition: {
-    category_monthly: [
-      { period: "2025-08", taxonomy_id: "food", name: "Food", amount_minor: 50000, count: 8, partial: true },
-      { period: "2025-08", taxonomy_id: "travel", name: "Travel", amount_minor: 30000, count: 2, partial: true },
-      { period: "2025-09", taxonomy_id: "food", name: "Food", amount_minor: 60000, count: 9, partial: false },
-      { period: "2025-09", taxonomy_id: "travel", name: "Travel", amount_minor: 30000, count: 1, partial: false },
-    ],
-    subcategory_monthly: [
-      { period: "2025-08", taxonomy_id: "cafes", name: "Cafes", amount_minor: 50000, count: 8, partial: true },
-      { period: "2025-08", taxonomy_id: "flights", name: "Flights", amount_minor: 30000, count: 2, partial: true },
-    ],
-    category_ranked: [
-      { taxonomy_id: "food", name: "Food", amount_minor: 110000, count: 17, percentage: 64.7059 },
-      { taxonomy_id: "travel", name: "Travel", amount_minor: 60000, count: 3, percentage: 35.2941 },
-    ],
-    subcategory_ranked: [
-      { taxonomy_id: "cafes", name: "Cafes", amount_minor: 50000, count: 8, percentage: 62.5 },
-      { taxonomy_id: "flights", name: "Flights", amount_minor: 30000, count: 2, percentage: 37.5 },
-    ],
+    spending: {
+      category_monthly: [
+        { period: "2025-08", taxonomy_id: "food", name: "Food", amount_minor: 50000, count: 8, partial: true },
+        { period: "2025-08", taxonomy_id: "travel", name: "Travel", amount_minor: 30000, count: 2, partial: true },
+        { period: "2025-09", taxonomy_id: "food", name: "Food", amount_minor: 60000, count: 9, partial: false },
+        { period: "2025-09", taxonomy_id: "travel", name: "Travel", amount_minor: 30000, count: 1, partial: false },
+      ],
+      subcategory_monthly: [
+        { period: "2025-08", taxonomy_id: "cafes", name: "Cafes", amount_minor: 50000, count: 8, partial: true },
+        { period: "2025-08", taxonomy_id: "flights", name: "Flights", amount_minor: 30000, count: 2, partial: true },
+      ],
+      category_ranked: [
+        { taxonomy_id: "food", name: "Food", amount_minor: 110000, count: 17, percentage: 64.7059 },
+        { taxonomy_id: "travel", name: "Travel", amount_minor: 60000, count: 3, percentage: 35.2941 },
+      ],
+      subcategory_ranked: [
+        { taxonomy_id: "cafes", name: "Cafes", amount_minor: 50000, count: 8, percentage: 62.5 },
+        { taxonomy_id: "flights", name: "Flights", amount_minor: 30000, count: 2, percentage: 37.5 },
+      ],
+    },
+    income: {
+      category_monthly: [
+        { period: "2025-08", taxonomy_id: "income", name: "Income", amount_minor: 100000, count: 1, partial: true },
+        { period: "2025-09", taxonomy_id: "income", name: "Income", amount_minor: 120000, count: 1, partial: false },
+      ],
+      subcategory_monthly: [
+        { period: "2025-08", taxonomy_id: "salary", name: "Salary", amount_minor: 100000, count: 1, partial: true },
+        { period: "2025-09", taxonomy_id: "salary", name: "Salary", amount_minor: 120000, count: 1, partial: false },
+      ],
+      category_ranked: [
+        { taxonomy_id: "income", name: "Income", amount_minor: 220000, count: 2, percentage: 100 },
+      ],
+      subcategory_ranked: [
+        { taxonomy_id: "salary", name: "Salary", amount_minor: 220000, count: 2, percentage: 100 },
+      ],
+    },
   },
   annual: [
     {

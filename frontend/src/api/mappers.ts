@@ -7,6 +7,7 @@ import type {
   DashboardAnnualMonth,
   DashboardAnnualPoint,
   DashboardBoundaryPartials,
+  DashboardCompositionBreakdown,
   DashboardCumulativePoint,
   DashboardMetricComparison,
   DashboardMonthlyCompositionItem,
@@ -534,6 +535,16 @@ const mapRankedCompositionItem = (input: unknown): DashboardRankedCompositionIte
   };
 };
 
+const mapCompositionBreakdown = (input: unknown): DashboardCompositionBreakdown => {
+  const breakdown = object(input);
+  return {
+    categoryMonthly: array(value(breakdown, "category_monthly", "categoryMonthly")).map(mapMonthlyCompositionItem),
+    subcategoryMonthly: array(value(breakdown, "subcategory_monthly", "subcategoryMonthly")).map(mapMonthlyCompositionItem),
+    categoryRanked: array(value(breakdown, "category_ranked", "categoryRanked")).map(mapRankedCompositionItem),
+    subcategoryRanked: array(value(breakdown, "subcategory_ranked", "subcategoryRanked")).map(mapRankedCompositionItem),
+  };
+};
+
 const mapAnnualMonth = (input: unknown): DashboardAnnualMonth => {
   const item = object(input);
   return {
@@ -630,10 +641,8 @@ export const mapDashboard = (input: unknown): Dashboard => {
       },
     },
     composition: {
-      categoryMonthly: array(value(composition, "category_monthly", "categoryMonthly")).map(mapMonthlyCompositionItem),
-      subcategoryMonthly: array(value(composition, "subcategory_monthly", "subcategoryMonthly")).map(mapMonthlyCompositionItem),
-      categoryRanked: array(value(composition, "category_ranked", "categoryRanked")).map(mapRankedCompositionItem),
-      subcategoryRanked: array(value(composition, "subcategory_ranked", "subcategoryRanked")).map(mapRankedCompositionItem),
+      spending: mapCompositionBreakdown(composition.spending),
+      income: mapCompositionBreakdown(composition.income),
     },
     annual: array(root.annual).map(mapAnnualPoint),
     cumulative: array(root.cumulative).map(mapCumulativePoint),
