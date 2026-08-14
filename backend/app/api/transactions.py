@@ -3,17 +3,20 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.orm import joinedload
 
 from backend.app.api.dependencies import SessionDependency
 from backend.app.api.pagination import Page
 from backend.app.database.models import (
+    Account,
     BatchStatus,
+    Category,
     DuplicateStatus,
     ImportBatch,
     StagedDisposition,
     StagedTransaction,
+    Subcategory,
     Transaction,
     TransactionDeletion,
     TransactionEvent,
@@ -25,6 +28,9 @@ from backend.app.sources.normalization import normalize_description
 from backend.app.taxonomy.validation import validate_active_taxonomy
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+TransactionSortField = Literal["date", "description", "account", "category", "amount"]
+SortDirection = Literal["asc", "desc"]
 
 
 class TransactionRead(BaseModel):
@@ -82,6 +88,8 @@ def list_transactions(
     account_id: str | None = None,
     category_id: str | None = None,
     search: str | None = None,
+    sort_by: Annotated[TransactionSortField, Query()] = "date",
+    sort_direction: Annotated[SortDirection, Query()] = "desc",
 ) -> Page[TransactionRead]:
     conditions = [Transaction.is_excluded.is_(False)]
     if currency:
@@ -101,16 +109,35 @@ def list_transactions(
     total = int(
         session.scalar(select(func.count()).select_from(Transaction).where(*conditions)) or 0
     )
+    sort_expressions = {
+        "date": (Transaction.transaction_date,),
+        "description": (func.lower(Transaction.description),),
+        "account": (func.lower(Account.name),),
+        "category": (
+            func.lower(func.coalesce(Category.display_name, "Uncategorized")),
+            func.lower(func.coalesce(Subcategory.display_name, "")),
+        ),
+        "amount": (Transaction.amount_minor,),
+    }
+    order = asc if sort_direction == "asc" else desc
+    order_by = [order(expression) for expression in sort_expressions[sort_by]]
+    if sort_by != "date":
+        order_by.append(Transaction.transaction_date.desc())
+    order_by.extend((Transaction.created_at.desc(), Transaction.id.asc()))
+
     transactions = list(
         session.scalars(
             select(Transaction)
+            .join(Account, Transaction.account_id == Account.id)
+            .outerjoin(Category, Transaction.category_id == Category.id)
+            .outerjoin(Subcategory, Transaction.subcategory_id == Subcategory.id)
             .options(
                 joinedload(Transaction.account),
                 joinedload(Transaction.category),
                 joinedload(Transaction.subcategory),
             )
             .where(*conditions)
-            .order_by(Transaction.transaction_date.desc(), Transaction.created_at.desc())
+            .order_by(*order_by)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )

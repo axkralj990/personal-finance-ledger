@@ -320,6 +320,9 @@ export interface Page<T> {
   total: number;
 }
 
+export type TransactionSortField = "date" | "description" | "account" | "category" | "amount";
+export type SortDirection = "asc" | "desc";
+
 export interface TransactionQuery {
   page?: number;
   pageSize?: number;
@@ -329,6 +332,8 @@ export interface TransactionQuery {
   accountId?: Identifier;
   categoryId?: Identifier;
   search?: string;
+  sortBy?: TransactionSortField;
+  sortDirection?: SortDirection;
 }
 
 export interface ReportQuery {

@@ -141,8 +141,12 @@ input:disabled, select:disabled, textarea:disabled { color: #777970; background:
 
 .filter-bar { display: grid; grid-template-columns: repeat(4, minmax(8rem, 1fr)); gap: .8rem; margin-bottom: 1.5rem; padding-bottom: 1.2rem; border-bottom: 1px solid var(--rule); }
 .filter-bar .search-field { grid-column: span 2; }
+.transaction-sort-controls { display: flex; justify-content: flex-end; gap: .8rem; margin-bottom: .75rem; }
+.transaction-sort-controls .field { min-width: 9rem; }
 .data-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
 .data-table th { padding: .7rem .6rem; color: var(--color-ink-muted); border-bottom: 1px solid var(--rule-dark); font-size: .64rem; letter-spacing: .07em; text-align: left; text-transform: uppercase; }
+.sort-header { display: inline-flex; align-items: center; gap: .25rem; padding: 0; color: inherit; border: 0; background: transparent; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.sort-header svg { width: .8rem; height: .8rem; }
 .data-table td { padding: .8rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: middle; }
 .data-table tbody tr:hover { background: rgb(49 91 69 / .045); }
 .data-table .amount { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
@@ -467,6 +471,8 @@ input:disabled, select:disabled, textarea:disabled { color: #777970; background:
   .three-column, .form-grid { grid-template-columns: 1fr; }
   .filter-bar { grid-template-columns: 1fr; }
   .filter-bar .search-field { grid-column: auto; }
+  .transaction-sort-controls { justify-content: stretch; }
+  .transaction-sort-controls .field { min-width: 0; flex: 1; }
   .desktop-table, .desktop-grid { display: none; }
   .mobile-records { display: block; }
   .workflow { display: flex; overflow-x: auto; }
