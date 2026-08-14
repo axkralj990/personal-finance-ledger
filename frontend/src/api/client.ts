@@ -28,6 +28,8 @@ import {
   mapSubcategory,
   mapTagRule,
   mapTagRules,
+  mapTaggingModel,
+  mapTaggingModelOverview,
   mapTransaction,
   mapTransactionPage,
   mapValuation,
@@ -65,6 +67,8 @@ import type {
   StagedTransaction,
   Subcategory,
   TagRule,
+  TaggingModel,
+  TaggingModelOverview,
   Transaction,
   TransactionQuery,
   Valuation,
@@ -379,6 +383,25 @@ export class ApiClient {
         { method: "PATCH", body: JSON.stringify({ is_enabled: patch.active }) },
         mapTagRule,
       ),
+  };
+
+  taggingModels = {
+    overview: (): Promise<TaggingModelOverview> =>
+      this.request(`${API_ROOT}/tagging/models`, {}, mapTaggingModelOverview),
+    retrain: (): Promise<TaggingModel> =>
+      this.request(`${API_ROOT}/tagging/models/retrain`, { method: "POST" }, (input) => {
+        const model = mapTaggingModel(input);
+        if (!model) throw new Error("The retraining response did not include a model.");
+        return model;
+      }),
+    activate: (modelVersionId: string): Promise<TaggingModel> =>
+      this.request(`${API_ROOT}/tagging/models/${modelVersionId}/activate`, { method: "POST" }, (input) => {
+        const model = mapTaggingModel(input);
+        if (!model) throw new Error("The activation response did not include a model.");
+        return model;
+      }),
+    reject: (modelVersionId: string): Promise<void> =>
+      this.request(`${API_ROOT}/tagging/models/${modelVersionId}`, { method: "DELETE" }, () => undefined),
   };
 
   reports = {

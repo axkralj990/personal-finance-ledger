@@ -31,6 +31,7 @@ import type {
   MappingProposal,
   MappingSuggestionPayload,
   MappingSuggestion,
+  ModelCrossValidation,
   Page,
   Portfolio,
   PortfolioHistoryPoint,
@@ -44,6 +45,8 @@ import type {
   StagedTransaction,
   Subcategory,
   TagRule,
+  TaggingModel,
+  TaggingModelOverview,
   Transaction,
   TransactionKind,
   Valuation,
@@ -408,6 +411,53 @@ export const mapTagRule = (input: unknown): TagRule => {
 };
 
 export const mapTagRules = (input: unknown): TagRule[] => records(input).map(mapTagRule);
+
+const mapModelCrossValidation = (input: unknown): ModelCrossValidation => {
+  const item = object(input);
+  return {
+    requestedFolds: number(value(item, "requested_folds", "requestedFolds")),
+    effectiveFolds: number(value(item, "effective_folds", "effectiveFolds")),
+    evaluatedRowCount: number(value(item, "evaluated_row_count", "evaluatedRowCount")),
+    categoryAccuracy: number(value(item, "category_accuracy", "categoryAccuracy")),
+    exactMatchAccuracy: number(value(item, "exact_match_accuracy", "exactMatchAccuracy")),
+    autoAcceptCoverage: number(value(item, "auto_accept_coverage", "autoAcceptCoverage")),
+    autoAcceptAccuracy: nullableNumber(value(item, "auto_accept_accuracy", "autoAcceptAccuracy")),
+  };
+};
+
+export const mapTaggingModel = (input: unknown): TaggingModel | null => {
+  const item = object(input);
+  if (!Object.keys(item).length) return null;
+  const crossValidation = value(item, "cross_validation", "crossValidation");
+  return {
+    modelVersionId: text(value(item, "model_version_id", "modelVersionId")),
+    modelName: text(value(item, "model_name", "modelName")),
+    status: text(item.status, "ACTIVE") as TaggingModel["status"],
+    createdAt: text(value(item, "created_at", "createdAt")),
+    activatedAt: nullableText(value(item, "activated_at", "activatedAt")),
+    trainingRowCount: number(value(item, "training_row_count", "trainingRowCount")),
+    categoryCount: number(value(item, "category_count", "categoryCount")),
+    subcategoryModelCount: number(value(item, "subcategory_model_count", "subcategoryModelCount")),
+    subcategoryConstantCount: number(value(item, "subcategory_constant_count", "subcategoryConstantCount")),
+    categoryThreshold: number(value(item, "category_threshold", "categoryThreshold")),
+    subcategoryThreshold: number(value(item, "subcategory_threshold", "subcategoryThreshold")),
+    evaluationSchemaVersion: nullableText(value(item, "evaluation_schema_version", "evaluationSchemaVersion")),
+    trainingDataChecksum: nullableText(value(item, "training_data_checksum", "trainingDataChecksum")),
+    taxonomyCurrent: bool(value(item, "taxonomy_current", "taxonomyCurrent")),
+    crossValidation: Object.keys(object(crossValidation)).length
+      ? mapModelCrossValidation(crossValidation)
+      : null,
+  };
+};
+
+export const mapTaggingModelOverview = (input: unknown): TaggingModelOverview => {
+  const item = object(input);
+  return {
+    active: mapTaggingModel(item.active),
+    candidate: mapTaggingModel(item.candidate),
+    previous: mapTaggingModel(item.previous),
+  };
+};
 
 export const mapCurrencies = (input: unknown): string[] => {
   const root = object(input);

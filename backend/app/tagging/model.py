@@ -156,12 +156,12 @@ def load_inference_model(metadata: ModelVersion | None, data_dir: Path) -> Infer
         logger.warning("Active model %s unavailable: artifact is missing", metadata.id)
         return None
     try:
-        return verify_model_artifact(
-            artifact,
+        return _load_verified_model(
+            str(artifact),
             metadata.checksum,
             metadata.id,
             metadata.taxonomy_version,
-            metadata.training_metadata,
+            _json_digest(metadata.training_metadata),
         )
     except Exception as exc:
         logger.warning(
@@ -179,7 +179,7 @@ def verify_model_artifact(
     taxonomy_version: str,
     training_metadata: dict[str, Any],
 ) -> JoblibInferenceModel:
-    return _load_verified_model(
+    return _read_verified_model(
         str(artifact_path.resolve()),
         checksum,
         model_version_id,
@@ -190,6 +190,22 @@ def verify_model_artifact(
 
 @lru_cache(maxsize=8)
 def _load_verified_model(
+    artifact_path: str,
+    checksum: str,
+    model_version_id: str,
+    taxonomy_version: str,
+    metadata_digest: str,
+) -> JoblibInferenceModel:
+    return _read_verified_model(
+        artifact_path,
+        checksum,
+        model_version_id,
+        taxonomy_version,
+        metadata_digest,
+    )
+
+
+def _read_verified_model(
     artifact_path: str,
     checksum: str,
     model_version_id: str,

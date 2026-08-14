@@ -227,9 +227,11 @@ DATA_DIR="$HOME/.local/share/personal-finance-ledger/test" \
 
 The default minimum confidence is `0.70` for categories and `0.80` for subcategories. Use
 `--category-threshold` and `--subcategory-threshold` to override them. Training writes a new
-version under `DATA_DIR/models`, atomically activates its database metadata, and retains prior
-artifacts as inactive versions. Imports continue as manual review when no valid model is active or
-a prediction is below its required threshold.
+candidate under `DATA_DIR/models`. Open **Categories / Model training** to compare its grouped
+cross-validation metrics with the active model, then explicitly activate or reject it. Activation
+retains one previous artifact for rollback and retires older artifacts while preserving audit
+metadata. Imports continue as manual review when no valid model is active or a prediction is below
+its required threshold.
 
 Model files use joblib's pickle-based format. Load only artifacts created locally by this
 application or restored from a trusted backup. Never place artifacts from untrusted sources in the

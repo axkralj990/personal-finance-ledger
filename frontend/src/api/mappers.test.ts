@@ -12,6 +12,8 @@ import {
   mapAccount,
   mapStagedTransaction,
   mapTagRule,
+  mapTaggingModel,
+  mapTaggingModelOverview,
   mapTransaction,
 } from "./mappers";
 import batchFixture from "../test/fixtures/import-batch.json";
@@ -460,5 +462,47 @@ describe("backend contract mappers", () => {
         ],
       }),
     ).toThrow(/malformed/);
+  });
+
+  it("maps tagging model cross-validation metadata", () => {
+    expect(
+      mapTaggingModel({
+        model_version_id: "model-1",
+        model_name: "tagger-1",
+        status: "CANDIDATE",
+        created_at: "2026-08-14T12:00:00Z",
+        activated_at: null,
+        training_row_count: 75,
+        category_count: 4,
+        subcategory_model_count: 2,
+        subcategory_constant_count: 1,
+        category_threshold: 0.7,
+        subcategory_threshold: 0.8,
+        evaluation_schema_version: "grouped-hierarchy-v1",
+        training_data_checksum: "snapshot-1",
+        taxonomy_current: true,
+        cross_validation: {
+          requested_folds: 5,
+          effective_folds: 3,
+          evaluated_row_count: 75,
+          category_accuracy: 0.92,
+          exact_match_accuracy: 0.84,
+          auto_accept_coverage: 0.72,
+          auto_accept_accuracy: 0.96,
+        },
+      }),
+    ).toMatchObject({
+      modelVersionId: "model-1",
+      status: "CANDIDATE",
+      activatedAt: null,
+      trainingRowCount: 75,
+      taxonomyCurrent: true,
+      crossValidation: { effectiveFolds: 3, exactMatchAccuracy: 0.84 },
+    });
+    expect(mapTaggingModelOverview({ active: null, candidate: { model_version_id: "model-1", status: "CANDIDATE" }, previous: null })).toMatchObject({
+      active: null,
+      candidate: { modelVersionId: "model-1", status: "CANDIDATE" },
+      previous: null,
+    });
   });
 });

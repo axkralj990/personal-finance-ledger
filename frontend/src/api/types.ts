@@ -296,6 +296,40 @@ export interface TagRule {
   active: boolean;
 }
 
+export interface ModelCrossValidation {
+  requestedFolds: number;
+  effectiveFolds: number;
+  evaluatedRowCount: number;
+  categoryAccuracy: number;
+  exactMatchAccuracy: number;
+  autoAcceptCoverage: number;
+  autoAcceptAccuracy: number | null;
+}
+
+export interface TaggingModel {
+  modelVersionId: Identifier;
+  modelName: string;
+  status: "ACTIVE" | "CANDIDATE" | "PREVIOUS";
+  createdAt: string;
+  activatedAt: string | null;
+  trainingRowCount: number;
+  categoryCount: number;
+  subcategoryModelCount: number;
+  subcategoryConstantCount: number;
+  categoryThreshold: number;
+  subcategoryThreshold: number;
+  evaluationSchemaVersion: string | null;
+  trainingDataChecksum: string | null;
+  taxonomyCurrent: boolean;
+  crossValidation: ModelCrossValidation | null;
+}
+
+export interface TaggingModelOverview {
+  active: TaggingModel | null;
+  candidate: TaggingModel | null;
+  previous: TaggingModel | null;
+}
+
 export interface Transaction {
   id: Identifier;
   revision: number;

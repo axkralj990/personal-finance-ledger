@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from "react";
-import { Pencil, Power, Plus } from "lucide-react";
+import { BrainCircuit, Pencil, Power, Plus, RefreshCw } from "lucide-react";
 import { api } from "../api/client";
-import type { Category, Subcategory } from "../api/types";
+import type { Category, Subcategory, TaggingModel } from "../api/types";
 import { EmptyState, ErrorState, Field, InlineNotice, LoadingState, PageHeader, StatusBadge } from "../components/ui";
 import { useResource } from "../hooks/use-resource";
 import { categoryName, subcategoriesFor, subcategoryName, taxonomyError } from "../shared/taxonomy";
 
 export default function CategoriesPage() {
+  const [tab, setTab] = useState<"taxonomy" | "model">("taxonomy");
   const categories = useResource(() => api.taxonomy.categories(), "managed-categories");
   const accounts = useResource(() => api.accounts.list(), "rule-accounts");
   const rules = useResource(() => api.tagRules.list(), "tag-rules");
@@ -83,6 +84,11 @@ export default function CategoriesPage() {
   return (
     <>
       <PageHeader eyebrow="Managed taxonomy" title="Categories" description="Maintain the parent-constrained classification used by imports and corrections. Deactivation preserves history; it only closes the label to future choices." />
+      <div className="tabs" aria-label="Category management mode">
+        <button type="button" className="tab-button" aria-pressed={tab === "taxonomy"} onClick={() => setTab("taxonomy")}>Taxonomy &amp; rules</button>
+        <button type="button" className="tab-button" aria-pressed={tab === "model"} onClick={() => setTab("model")}><BrainCircuit aria-hidden="true" /> Model training</button>
+      </div>
+      {tab === "taxonomy" ? <>
       {message && <InlineNotice tone={message.tone}>{message.text}</InlineNotice>}
       <div className="two-column" style={{ marginTop: "1.5rem" }}>
         <section>
@@ -139,6 +145,164 @@ export default function CategoriesPage() {
             <div className={`rule-row ${rule.active ? "" : "inactive"}`} key={rule.id}><strong>"{rule.match}"</strong><span>{categoryName(taxonomy, rule.categoryId)} / {subcategoryName(taxonomy, rule.subcategoryId)}</span><span>{rule.accountId ? accounts.data?.find((account) => account.id === rule.accountId)?.name ?? "Account" : "Global"}</span><button className="button ghost" disabled={busy} onClick={() => void perform(() => api.tagRules.patch(rule.id, { active: !rule.active }), `Rule ${rule.active ? "disabled" : "enabled"}.`)}><Power aria-hidden="true" /> {rule.active ? "Disable" : "Enable"}</button></div>
         )) : <EmptyState title="No exact-match rules" description="Rules appear only after an explicit correction is remembered or a rule is added here." />}
       </section>
+      </> : <ModelTrainingPanel />}
     </>
   );
+}
+
+function ModelTrainingPanel() {
+  const models = useResource(() => api.taggingModels.overview(), "tagging-model-overview");
+  const [busy, setBusy] = useState<"retrain" | "activate" | "reject" | "restore" | null>(null);
+  const [message, setMessage] = useState<{ tone: "good" | "bad"; text: string } | null>(null);
+  const active = models.data?.active ?? null;
+  const candidate = models.data?.candidate ?? null;
+  const previous = models.data?.previous ?? null;
+  const settingsModel = candidate ?? active;
+
+  async function retrain() {
+    setBusy("retrain");
+    setMessage(null);
+    try {
+      await api.taggingModels.retrain();
+      setMessage({ tone: "good", text: "Candidate trained. Compare its results before activation." });
+      models.reload();
+    } catch (error) {
+      setMessage({ tone: "bad", text: error instanceof Error ? error.message : "The model could not be retrained." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function activate(model: TaggingModel, restoring = false) {
+    const delta = exactMatchDelta(model, active);
+    if (!restoring && delta != null && delta < 0 && !window.confirm("This candidate has lower exact-match accuracy. Activate it anyway?")) return;
+    if (restoring && !window.confirm("Restore the previous model as active?")) return;
+    setBusy(restoring ? "restore" : "activate");
+    setMessage(null);
+    try {
+      await api.taggingModels.activate(model.modelVersionId);
+      setMessage({ tone: "good", text: restoring ? "Previous model restored." : "Candidate activated. The replaced model is available for rollback." });
+      models.reload();
+    } catch (error) {
+      setMessage({ tone: "bad", text: error instanceof Error ? error.message : "The model could not be activated." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reject() {
+    if (!candidate || !window.confirm("Reject and permanently delete this candidate?")) return;
+    setBusy("reject");
+    setMessage(null);
+    try {
+      await api.taggingModels.reject(candidate.modelVersionId);
+      setMessage({ tone: "good", text: "Candidate rejected. The active model was not changed." });
+      models.reload();
+    } catch (error) {
+      setMessage({ tone: "bad", text: error instanceof Error ? error.message : "The candidate could not be rejected." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="model-training">
+      <div className="ledger-panel panel-padding model-training-intro">
+        <div>
+          <p className="eyebrow">Active classifier</p>
+          <h2>Train from the full labeled ledger</h2>
+          <p>Retraining creates one reviewable candidate. The active model changes only after explicit activation, and one previous version remains available for rollback.</p>
+        </div>
+        <button className="button" type="button" disabled={busy !== null || candidate !== null} onClick={() => void retrain()}>
+          <RefreshCw className={busy === "retrain" ? "spin" : ""} aria-hidden="true" />
+          {busy === "retrain" ? "Training candidate..." : candidate ? "Candidate awaiting review" : "Train candidate"}
+        </button>
+      </div>
+
+      <dl className="model-settings" aria-label="Model training settings">
+        <div><dt>Category threshold</dt><dd>{percent(settingsModel?.categoryThreshold ?? 0.7)}</dd></div>
+        <div><dt>Subcategory threshold</dt><dd>{percent(settingsModel?.subcategoryThreshold ?? 0.8)}</dd></div>
+        <div><dt>Validation</dt><dd>{settingsModel?.crossValidation?.requestedFolds ?? 5} grouped folds</dd></div>
+        <div><dt>Training data</dt><dd>All eligible labels</dd></div>
+      </dl>
+
+      {message && <InlineNotice tone={message.tone}>{message.text}</InlineNotice>}
+      {models.loading ? <LoadingState label="Loading model versions" /> : models.error ? <ErrorState error={models.error} retry={models.reload} /> : <>
+        {candidate ? <CandidateComparison active={active} candidate={candidate} busy={busy} activate={() => void activate(candidate)} reject={() => void reject()} /> : active ? <ActiveModelSummary model={active} /> : <EmptyState title="No active model" description="Train a candidate after every represented category has at least two distinct labeled descriptions." />}
+        {previous && <section className="ledger-panel panel-padding model-previous">
+          <div><StatusBadge tone="warn">Previous</StatusBadge><h3>{previous.modelName}</h3><p>Activated {formatModelDate(previous.activatedAt)} · Exact hierarchy match {metricPercent(previous.crossValidation?.exactMatchAccuracy)}</p></div>
+          <button className="button secondary" type="button" disabled={busy !== null || candidate !== null || !previous.taxonomyCurrent} onClick={() => void activate(previous, true)}>{busy === "restore" ? "Restoring..." : "Restore previous"}</button>
+        </section>}
+      </>}
+    </section>
+  );
+}
+
+function CandidateComparison({ active, candidate, busy, activate, reject }: { active: TaggingModel | null; candidate: TaggingModel; busy: string | null; activate: () => void; reject: () => void }) {
+  const delta = exactMatchDelta(candidate, active);
+  const comparable = active?.evaluationSchemaVersion === candidate.evaluationSchemaVersion;
+  const sameSnapshot = Boolean(active?.trainingDataChecksum && active.trainingDataChecksum === candidate.trainingDataChecksum);
+  return <section className="model-candidate ledger-panel panel-padding">
+    <header className="model-candidate-header"><div><StatusBadge tone="warn">Candidate</StatusBadge><h2>{candidateHeadline(delta)}</h2><p>Trained {formatModelDate(candidate.createdAt)} from {candidate.trainingRowCount.toLocaleString()} labeled rows.</p></div><div className="page-actions"><button className="button secondary" type="button" disabled={busy !== null} onClick={reject}>{busy === "reject" ? "Rejecting..." : "Reject"}</button><button className="button" type="button" disabled={busy !== null || !candidate.taxonomyCurrent} onClick={activate}>{busy === "activate" ? "Activating..." : "Activate candidate"}</button></div></header>
+    {!candidate.taxonomyCurrent && <InlineNotice tone="bad">The taxonomy changed after training. Reject this candidate and train another.</InlineNotice>}
+    {!comparable && active && <InlineNotice tone="warn">The evaluation method differs from the active model, so improvement deltas are unavailable.</InlineNotice>}
+    {comparable && active && !sameSnapshot && <InlineNotice tone="warn">These runs used different ledger snapshots. Deltas are advisory, not a promotion guarantee.</InlineNotice>}
+    <div className="model-comparison-scroll"><table className="data-table model-comparison-table"><thead><tr><th>Metric</th><th>Active</th><th>Candidate</th><th>Change</th></tr></thead><tbody>
+      <ComparisonRow label="Exact hierarchy match" active={active?.crossValidation?.exactMatchAccuracy} candidate={candidate.crossValidation?.exactMatchAccuracy} comparable={comparable} primary />
+      <ComparisonRow label="Category accuracy" active={active?.crossValidation?.categoryAccuracy} candidate={candidate.crossValidation?.categoryAccuracy} comparable={comparable} />
+      <ComparisonRow label="Auto-accept accuracy" active={active?.crossValidation?.autoAcceptAccuracy} candidate={candidate.crossValidation?.autoAcceptAccuracy} comparable={comparable} />
+      <ComparisonRow label="Auto-accept coverage" active={active?.crossValidation?.autoAcceptCoverage} candidate={candidate.crossValidation?.autoAcceptCoverage} comparable={comparable} />
+    </tbody></table></div>
+    <dl className="model-meta"><div><dt>Active rows</dt><dd>{active?.trainingRowCount.toLocaleString() ?? "No baseline"}</dd></div><div><dt>Candidate rows</dt><dd>{candidate.trainingRowCount.toLocaleString()}</dd></div><div><dt>Active folds</dt><dd>{active?.crossValidation?.effectiveFolds ?? "Not recorded"}</dd></div><div><dt>Candidate folds</dt><dd>{candidate.crossValidation?.effectiveFolds ?? "Not recorded"}</dd></div></dl>
+  </section>;
+}
+
+function ActiveModelSummary({ model }: { model: TaggingModel }) {
+  return <section><div className="section-heading model-result-heading"><h2>Active cross-validation results</h2><p>Activated {formatModelDate(model.activatedAt)}</p></div>{model.crossValidation ? <div className="metric-strip model-metrics"><ModelMetric label="Category accuracy" value={percent(model.crossValidation.categoryAccuracy)} /><ModelMetric label="Exact hierarchy match" value={percent(model.crossValidation.exactMatchAccuracy)} /><ModelMetric label="Auto-accept coverage" value={percent(model.crossValidation.autoAcceptCoverage)} /><ModelMetric label="Auto-accept accuracy" value={metricPercent(model.crossValidation.autoAcceptAccuracy)} /></div> : <EmptyState title="No validation metrics" description="This model predates cross-validation. Train a candidate to measure current performance." />}<dl className="model-meta"><div><dt>Training rows</dt><dd>{model.trainingRowCount.toLocaleString()}</dd></div><div><dt>Categories</dt><dd>{model.categoryCount}</dd></div><div><dt>Effective folds</dt><dd>{model.crossValidation ? `${model.crossValidation.effectiveFolds} of ${model.crossValidation.requestedFolds}` : "Not recorded"}</dd></div><div><dt>Evaluated rows</dt><dd>{model.crossValidation?.evaluatedRowCount.toLocaleString() ?? "Not recorded"}</dd></div></dl></section>;
+}
+
+function ComparisonRow({ label, active, candidate, comparable, primary = false }: { label: string; active: number | null | undefined; candidate: number | null | undefined; comparable: boolean; primary?: boolean }) {
+  const delta = active == null || candidate == null || !comparable ? null : candidate - active;
+  return <tr className={primary ? "primary-comparison" : ""}><th scope="row">{label}</th><td>{metricPercent(active)}</td><td>{metricPercent(candidate)}</td><td className={delta == null ? "" : delta >= 0 ? "positive-delta" : "negative-delta"}>{delta == null ? "N/A" : percentagePointDelta(delta)}</td></tr>;
+}
+
+function ModelMetric({ label, value }: { label: string; value: string }) {
+  return <article className="metric"><span>{label}</span><strong>{value}</strong></article>;
+}
+
+function percent(value: number): string {
+  return new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 }).format(value);
+}
+
+function metricPercent(value: number | null | undefined): string {
+  return value == null ? "N/A" : percent(value);
+}
+
+function exactMatchDelta(candidate: TaggingModel, active: TaggingModel | null): number | null {
+  if (!active || active.evaluationSchemaVersion !== candidate.evaluationSchemaVersion) return null;
+  const activeValue = active.crossValidation?.exactMatchAccuracy;
+  const candidateValue = candidate.crossValidation?.exactMatchAccuracy;
+  return activeValue == null || candidateValue == null ? null : candidateValue - activeValue;
+}
+
+function candidateHeadline(delta: number | null): string {
+  if (delta == null) return "Candidate ready for review";
+  if (Math.abs(delta) < 0.0005) return "Exact-match accuracy is unchanged";
+  return `Exact-match accuracy is ${absolutePercentagePoints(delta)} ${delta > 0 ? "better" : "worse"}`;
+}
+
+function percentagePointDelta(value: number): string {
+  const formatted = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, signDisplay: "always" }).format(value * 100);
+  return `${formatted} pp`;
+}
+
+function absolutePercentagePoints(value: number): string {
+  const formatted = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(Math.abs(value) * 100);
+  return `${formatted} pp`;
+}
+
+function formatModelDate(value: string | null): string {
+  if (!value) return "at an unknown time";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "at an unknown time" : date.toLocaleString();
 }

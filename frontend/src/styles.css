@@ -133,6 +133,27 @@ input:disabled, select:disabled, textarea:disabled { color: #777970; background:
 .metric strong { display: block; margin-top: 1.4rem; font-family: var(--font-display); font-size: clamp(1.7rem, 4vw, 2.7rem); font-weight: 570; line-height: 1; font-variant-numeric: tabular-nums; }
 .metric.net-positive strong { color: var(--color-forest); }
 .metric.net-negative strong { color: var(--color-rust); }
+.model-training { display: grid; gap: 1.5rem; }
+.model-training-intro { display: flex; align-items: center; justify-content: space-between; gap: 2rem; }
+.model-training-intro p:last-child { max-width: 50rem; margin: .65rem 0 0; color: var(--color-ink-muted); font-size: .82rem; line-height: 1.55; }
+.model-training-intro .button { flex: 0 0 auto; }
+.model-settings, .model-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border-block: 1px solid var(--rule); }
+.model-settings div, .model-meta div { padding: .85rem 1rem; border-right: 1px solid var(--rule); }
+.model-settings div:last-child, .model-meta div:last-child { border-right: 0; }
+.model-settings dt, .model-meta dt { color: var(--color-ink-muted); font-size: .63rem; font-weight: 680; letter-spacing: .08em; text-transform: uppercase; }
+.model-settings dd, .model-meta dd { margin: .35rem 0 0; font-size: .84rem; font-weight: 620; }
+.model-result-heading { margin: .75rem 0 0; }
+.model-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 0; }
+.model-candidate { display: grid; gap: 1rem; }
+.model-candidate-header, .model-previous { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; }
+.model-candidate-header h2, .model-previous h3 { margin-top: .55rem; }
+.model-candidate-header p, .model-previous p { margin: .35rem 0 0; color: var(--color-ink-muted); font-size: .76rem; }
+.model-comparison-scroll { overflow-x: auto; }
+.model-comparison-table { min-width: 42rem; }
+.model-comparison-table th:not(:first-child), .model-comparison-table td { text-align: right; font-variant-numeric: tabular-nums; }
+.model-comparison-table .primary-comparison { background: rgb(49 91 69 / .055); }
+.positive-delta { color: var(--color-forest); font-weight: 680; }
+.negative-delta { color: var(--color-rust); font-weight: 680; }
 .chart-panel { min-height: 22rem; padding: 1.25rem 0 0; border-top: 1px solid var(--rule-dark); }
 .chart-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: .7rem; }
 .chart-title h3 { font-family: var(--font-display); font-size: 1.35rem; }
@@ -441,6 +462,11 @@ input:disabled, select:disabled, textarea:disabled { color: #777970; background:
   .main-content { margin-left: 5.2rem; }
   .main-content::before { left: 5.2rem; }
   .two-column { grid-template-columns: 1fr; }
+  .model-training-intro { align-items: flex-start; flex-direction: column; }
+  .model-candidate-header, .model-previous { align-items: flex-start; flex-direction: column; }
+  .model-settings, .model-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-settings div:nth-child(2), .model-meta div:nth-child(2) { border-right: 0; }
+  .model-settings div:nth-child(-n+2), .model-meta div:nth-child(-n+2) { border-bottom: 1px solid var(--rule); }
   .filter-bar { grid-template-columns: repeat(2, 1fr); }
   .dashboard-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-kpi:nth-of-type(2) { border-right: 0; }
@@ -465,6 +491,9 @@ input:disabled, select:disabled, textarea:disabled { color: #777970; background:
   .page-actions { margin-top: 1rem; }
   h1 { font-size: 2.75rem; }
   .metric-strip { grid-template-columns: 1fr; }
+  .model-settings, .model-meta { grid-template-columns: 1fr; }
+  .model-settings div, .model-settings div:nth-child(2), .model-meta div, .model-meta div:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--rule); }
+  .model-settings div:last-child, .model-meta div:last-child { border-bottom: 0; }
   .metric { min-height: 6.5rem; border-right: 0; border-bottom: 1px solid var(--rule); }
   .metric strong { margin-top: .8rem; }
   .metric:last-child { border-bottom: 0; }
