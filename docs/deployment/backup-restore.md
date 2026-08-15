@@ -4,7 +4,7 @@ The SQLite database and retained files live below the host path configured by `F
 
 ## Online Database Backup
 
-Run the included script from any directory:
+Run the included script from the production checkout:
 
 ```sh
 git switch main
@@ -22,16 +22,16 @@ The CLI uses SQLite's online backup API rather than copying a live database file
 For Synology Task Scheduler, create a scheduled **User-defined script** under an account allowed to run Docker:
 
 ```sh
-FINANCE_ENV_DIR=/volume1/docker/personal-finance/config \
-  /volume1/docker/personal-finance/app/scripts/finance.sh backup \
-  >> /volume1/docker/personal-finance/backup.log 2>&1
+FINANCE_ENV_DIR=/volume1/docker/personal-finance-config \
+  /volume1/docker/personal-finance-ledger/scripts/finance.sh backup \
+  >> /volume1/docker/personal-finance-config/backup.log 2>&1
 ```
 
 Monitor the task and apply an explicit retention policy appropriate to available storage. The script never deletes old backups.
 
 ## Full Backup
 
-The SQLite database backup does not include `/data/uploads` or `/data/models`. Periodically snapshot or back up the entire `/volume1/docker/personal-finance/data` directory with Hyper Backup or Snapshot Replication. That full-volume backup includes the model artifacts under `/data/models`. Coordinate retention so a database backup and retained files from the same period remain available.
+The SQLite database backup does not include `/data/uploads` or `/data/models`. Periodically snapshot or back up the complete host directory configured by `FINANCE_DATA_PATH`, such as `/volume1/docker/personal-finance-db`, with Hyper Backup or Snapshot Replication. Use the online backup command as the authoritative database copy unless the application is stopped or the backup mechanism guarantees an atomic filesystem snapshot; a file-level copy of a live SQLite/WAL directory may be inconsistent. Coordinate retention so the database backup, uploads, and model artifacts from the same period remain available.
 
 ## Restore
 
@@ -41,11 +41,11 @@ and models are not changed. Set `FINANCE_DATA_PATH` to the same absolute value u
 external production environment file.
 
 ```sh
-cd /volume1/docker/personal-finance/app
-export FINANCE_ENV_DIR=/volume1/docker/personal-finance/config
+cd /volume1/docker/personal-finance-ledger
+export FINANCE_ENV_DIR=/volume1/docker/personal-finance-config
 ./scripts/finance.sh stop
 
-export FINANCE_DATA_PATH=/volume1/docker/personal-finance/data/production
+export FINANCE_DATA_PATH=/volume1/docker/personal-finance-db
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 sudo mkdir -p "$FINANCE_DATA_PATH/restore-$stamp"
 for file in finance.sqlite3 finance.sqlite3-wal finance.sqlite3-shm; do

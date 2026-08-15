@@ -93,7 +93,9 @@ curl --fail http://127.0.0.1:8000/health
 curl --fail http://127.0.0.1:18000/health
 ```
 
-See the [Synology deployment runbook](docs/deployment/synology.md),
+For a source-based Synology installation, including Docker permissions, custom ports, LAN or
+Tailscale access, existing-data migration, startup recovery, and updates, see the
+[Synology deployment runbook](docs/deployment/synology.md). Also see the
 [production model training guide](docs/deployment/migration.md), and
 [backup and restore guide](docs/deployment/backup-restore.md) for production operations.
 

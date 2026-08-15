@@ -326,6 +326,28 @@ describe("PortfolioPage", () => {
     });
   });
 
+  it("creates an asset when randomUUID is unavailable on LAN HTTP", async () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.fill(17);
+        return bytes;
+      },
+    });
+    const fetchMock = mockPortfolioApi();
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={["/portfolio"]}><App /></MemoryRouter>);
+    await screen.findByRole("heading", { name: "Capital, with provenance" });
+    await user.click(screen.getByRole("button", { name: "Add asset" }));
+    const dialog = screen.getByRole("dialog", { name: "Add asset" });
+    await user.type(within(dialog).getByLabelText("Asset name"), "Savings");
+    await user.type(within(dialog).getByLabelText("Current balance (EUR)"), "100");
+    await user.click(within(dialog).getByRole("button", { name: "Add asset" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url) === "/api/v1/assets" && init?.method === "POST")).toBe(true));
+    const createCall = fetchMock.mock.calls.find(([url, init]) => String(url) === "/api/v1/assets" && init?.method === "POST");
+    expect(JSON.parse(String(createCall?.[1]?.body)).id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
   it("creates a security from purchase facts and automatically saves its current quote", async () => {
     const fetchMock = mockPortfolioApi();
     const user = userEvent.setup();
