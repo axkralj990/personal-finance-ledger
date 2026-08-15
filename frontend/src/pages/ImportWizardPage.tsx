@@ -201,7 +201,11 @@ export default function ImportWizardPage() {
       <MappingStep
         batch={item}
         account={account}
-        onStaged={batch.reload}
+        onStaged={(stagedBatch) => {
+          setBatchSnapshot(stagedBatch);
+          setSearchParams({}, { replace: true });
+        }}
+        onStageFailed={batch.reload}
         onBack={() =>
           setSearchParams({ step: "inspect", ...(remapping && { remap: "1" }) })
         }
@@ -532,11 +536,13 @@ function MappingStep({
   batch,
   account,
   onStaged,
+  onStageFailed,
   onBack,
 }: {
   batch: ImportBatch;
   account: Account | null;
-  onStaged: () => void;
+  onStaged: (batch: ImportBatch) => void;
+  onStageFailed: () => void;
   onBack: () => void;
 }) {
   const inspection = useResource(
@@ -555,6 +561,7 @@ function MappingStep({
       account={account}
       inspection={inspection.data}
       onStaged={onStaged}
+      onStageFailed={onStageFailed}
       onBack={onBack}
     />
   );
@@ -571,12 +578,14 @@ function MappingForm({
   account,
   inspection,
   onStaged,
+  onStageFailed,
   onBack,
 }: {
   batch: ImportBatch;
   account: Account | null;
   inspection: ImportInspection;
-  onStaged: () => void;
+  onStaged: (batch: ImportBatch) => void;
+  onStageFailed: () => void;
   onBack: () => void;
 }) {
   const inferredProposal: MappingProposal | null = inspection.proposals.universal
@@ -788,19 +797,19 @@ function MappingForm({
         confirmRestaging: batch.mappingRevision > 0,
       });
       setRevision(confirmed.revision);
-      await api.imports.stage(
+      const stagedBatch = await api.imports.stage(
         batch.id,
         confirmed.revision,
         confirmed.mappingRevision,
       );
-      onStaged();
+      onStaged(stagedBatch);
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
           : "The mapping could not be staged.",
       );
-      onStaged();
+      onStageFailed();
     } finally {
       setSaving(false);
     }
@@ -1109,13 +1118,17 @@ function MappingControls({
   return (
     <>
       <MappingCard
-        title="Date and time"
-        note="Map a date, a timestamp, or both."
+        title="Transaction date"
+        note="Select one date or datetime column. Time values are discarded."
       >
-        <Field label="Transaction date" htmlFor="map-date">
+        <Field label="Date or datetime source" htmlFor="map-date">
           <select
             id="map-date"
-            value={plan.transactionDate?.sourceColumn ?? ""}
+            value={
+              plan.transactionDate?.sourceColumn ??
+              plan.transactionTimestamp?.sourceColumn ??
+              ""
+            }
             onChange={(event) =>
               setPlan((current) => ({
                 ...current,
@@ -1125,6 +1138,7 @@ function MappingControls({
                       format: inferDateFormat(inspection, event.target.value),
                     }
                   : null,
+                transactionTimestamp: null,
               }))
             }
           >
@@ -1134,65 +1148,29 @@ function MappingControls({
         <Field
           label="Date format"
           htmlFor="map-date-format"
-          hint="Required strptime format, for example %d/%m/%Y"
+          hint="Required strptime format; include time directives when present"
         >
           <input
             id="map-date-format"
             list="mapping-date-formats"
-            value={plan.transactionDate?.format ?? ""}
-            disabled={!plan.transactionDate}
+            value={
+              plan.transactionDate?.format ??
+              plan.transactionTimestamp?.format ??
+              ""
+            }
+            disabled={!plan.transactionDate && !plan.transactionTimestamp}
             onChange={(event) =>
               setPlan((current) => ({
                 ...current,
-                transactionDate: current.transactionDate
+                transactionDate: current.transactionDate ?? current.transactionTimestamp
                   ? {
-                      ...current.transactionDate,
+                      sourceColumn: (
+                        current.transactionDate ?? current.transactionTimestamp
+                      )!.sourceColumn,
                       format: event.target.value,
                     }
                   : null,
-              }))
-            }
-          />
-        </Field>
-        <Field label="Timestamp" htmlFor="map-timestamp">
-          <select
-            id="map-timestamp"
-            value={plan.transactionTimestamp?.sourceColumn ?? ""}
-            onChange={(event) =>
-              setPlan((current) => ({
-                ...current,
-                transactionTimestamp: event.target.value
-                  ? {
-                      sourceColumn: event.target.value,
-                      format: inferDateFormat(inspection, event.target.value),
-                      timezone: "UTC",
-                    }
-                  : null,
-              }))
-            }
-          >
-            {options(true)}
-          </select>
-        </Field>
-        <Field
-          label="Timestamp format"
-          htmlFor="map-timestamp-format"
-          hint="Required strptime format, including time directives when present"
-        >
-          <input
-            id="map-timestamp-format"
-            list="mapping-date-formats"
-            disabled={!plan.transactionTimestamp}
-            value={plan.transactionTimestamp?.format ?? ""}
-            onChange={(event) =>
-              setPlan((current) => ({
-                ...current,
-                transactionTimestamp: current.transactionTimestamp
-                  ? {
-                      ...current.transactionTimestamp,
-                      format: event.target.value,
-                    }
-                  : null,
+                transactionTimestamp: null,
               }))
             }
           />
@@ -1202,28 +1180,6 @@ function MappingControls({
             <option value={format} key={format} />
           ))}
         </datalist>
-        <Field
-          label="Timestamp timezone"
-          htmlFor="map-timezone"
-          hint="IANA name or UTC"
-        >
-          <input
-            id="map-timezone"
-            disabled={!plan.transactionTimestamp}
-            value={plan.transactionTimestamp?.timezone ?? "UTC"}
-            onChange={(event) =>
-              setPlan((current) => ({
-                ...current,
-                transactionTimestamp: current.transactionTimestamp
-                  ? {
-                      ...current.transactionTimestamp,
-                      timezone: event.target.value,
-                    }
-                  : null,
-              }))
-            }
-          />
-        </Field>
       </MappingCard>
       <MappingCard
         title="Description"

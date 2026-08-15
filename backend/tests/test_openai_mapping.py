@@ -23,6 +23,7 @@ from backend.app.imports.models import (
     SignedAmount,
     SourceRow,
     TextSource,
+    TimestampSource,
     UniversalMappingSpec,
 )
 from backend.app.imports.openai_mapping import (
@@ -212,6 +213,10 @@ def test_payload_sampling_is_representative_deterministic_and_canonical() -> Non
     assert first.payload.representative_rows[-1][5] == "<IDENTIFIER>"
     assert "Private merchant" not in canonical_payload_json(first.payload)
     assert len(first.sha256) == 64
+    assert first.payload.prompt_version == "universal-import-mapping-v2"
+    assert "transaction_date" in first.payload.canonical_fields
+    assert "transaction_timestamp" not in first.payload.canonical_fields
+    assert all("timezone" not in item for item in first.payload.allowed_transformations)
 
 
 def test_payload_redacts_user_controlled_headers_but_keeps_semantics_and_positions() -> None:
@@ -289,6 +294,33 @@ async def test_structured_response_returns_plan_and_safe_audit_metadata(tmp_path
     assert "Private merchant" not in dumped_result
     assert not hasattr(result.audit, "payload")
     assert not hasattr(result.audit, "raw_response")
+
+
+@pytest.mark.anyio
+async def test_structured_timestamp_response_is_canonicalized_to_date(tmp_path: Path) -> None:
+    parsed = _plan().model_copy(
+        update={
+            "transaction_date": None,
+            "transaction_timestamp": TimestampSource(
+                source_column="c000",
+                format="%Y-%m-%dT%H:%M:%S",
+                timezone="UTC",
+            ),
+        }
+    )
+    responses = FakeResponses(
+        SimpleNamespace(output_parsed=parsed, _request_id="req_date_only", output=[])
+    )
+
+    result = await OpenAIMappingBoundary(
+        _settings(tmp_path), client=FakeClient(responses)
+    ).suggest_mapping(_prepared(), consented_at=datetime.now(UTC))
+
+    assert isinstance(result, MappingSuggestionSuccess)
+    assert result.plan.transaction_date == DateSource(
+        source_column="c000", format="%Y-%m-%dT%H:%M:%S"
+    )
+    assert result.plan.transaction_timestamp is None
 
 
 @pytest.mark.anyio

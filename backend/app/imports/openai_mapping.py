@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from backend.app.config import Settings
 from backend.app.imports.models import (
     ColumnId,
+    DateSource,
     ImportFileType,
     ImportInspection,
     InferredValueType,
@@ -35,7 +36,7 @@ from backend.app.imports.models import (
     UniversalMappingSpec,
 )
 
-PROMPT_VERSION = "universal-import-mapping-v1"
+PROMPT_VERSION = "universal-import-mapping-v2"
 MAPPING_SCHEMA_VERSION = "universal-v1"
 PAYLOAD_VERSION = "openai-mapping-payload-v1"
 MAX_SAMPLE_ROWS = 12
@@ -168,7 +169,7 @@ class InspectionFacts(StrictModel):
 
 class MappingSuggestionPayload(StrictModel):
     payload_version: Literal["openai-mapping-payload-v1"] = PAYLOAD_VERSION
-    prompt_version: Literal["universal-import-mapping-v1"] = PROMPT_VERSION
+    prompt_version: Literal["universal-import-mapping-v2"] = PROMPT_VERSION
     canonical_fields: tuple[str, ...]
     allowed_transformations: tuple[str, ...]
     columns: tuple[MappingColumn, ...]
@@ -209,7 +210,7 @@ class MappingAuditMetadata(StrictModel):
     provider: Literal["openai"] = "openai"
     model: str
     request_id: str | None = None
-    prompt_version: Literal["universal-import-mapping-v1"] = PROMPT_VERSION
+    prompt_version: Literal["universal-import-mapping-v2"] = PROMPT_VERSION
     schema_version: Literal["universal-v1"] = MAPPING_SCHEMA_VERSION
     payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     consented_at: datetime | None
@@ -309,7 +310,6 @@ def prepare_mapping_payload(
     payload = MappingSuggestionPayload(
         canonical_fields=(
             "transaction_date",
-            "transaction_timestamp",
             "description",
             "amount",
             "currency",
@@ -318,8 +318,7 @@ def prepare_mapping_payload(
             "subcategory_hint",
         ),
         allowed_transformations=(
-            "explicit date format and day-first parsing",
-            "timestamp timezone",
+            "explicit date or datetime format with time discarded",
             "decimal and thousands separators",
             "currency-symbol removal",
             "signed amount with EXPENSES_NEGATIVE preserve or EXPENSES_POSITIVE invert",
@@ -483,6 +482,7 @@ class OpenAIMappingBoundary:
                 )
             if not isinstance(parsed, UniversalMappingSpec):
                 parsed = UniversalMappingSpec.model_validate(parsed)
+            parsed = _date_only_mapping(parsed)
             if not _plan_uses_available_columns(parsed, prepared.payload):
                 return self._fallback(
                     prepared,
@@ -750,6 +750,19 @@ def _plan_uses_available_columns(
     return references <= available
 
 
+def _date_only_mapping(plan: UniversalMappingSpec) -> UniversalMappingSpec:
+    timestamp = plan.transaction_timestamp
+    if timestamp is None:
+        return plan
+    transaction_date = plan.transaction_date or DateSource(
+        source_column=timestamp.source_column,
+        format=timestamp.format,
+    )
+    return plan.model_copy(
+        update={"transaction_date": transaction_date, "transaction_timestamp": None}
+    )
+
+
 def _nested_items(value: Any) -> Iterator[tuple[str, Any]]:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -785,8 +798,9 @@ def _provider_error_details(
 
 
 _SYSTEM_PROMPT = """You map inspected financial tables to the supplied universal import schema.
-Return only a UniversalMappingSpec. Use positional column IDs exactly as supplied. Date and
-timestamp formats must be explicit Python strptime formats matching the redacted samples. For signed
+Return only a UniversalMappingSpec. Use positional column IDs exactly as supplied. Map the single
+date or datetime source to transaction_date, leave transaction_timestamp null, and use an explicit
+Python strptime format matching the redacted samples. Time values are discarded. For signed
 amounts, EXPENSES_NEGATIVE preserves source signs and EXPENSES_POSITIVE inverts them. Never infer
 personal categories or values. Use only the listed canonical fields and transformations. If the
 evidence is insufficient, refuse rather than inventing a mapping."""

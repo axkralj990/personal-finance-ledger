@@ -101,13 +101,12 @@ def infer_universal_mapping(
 ) -> UniversalMappingSpec | None:
     matches = {target: _alias_column(inspection, aliases) for target, aliases in ALIASES.items()}
     description = matches["description"]
-    date_column = matches["transaction_date"]
-    timestamp_column = matches["transaction_timestamp"]
+    date_column = matches["transaction_date"] or matches["transaction_timestamp"]
     amount_column = matches["amount"]
     debit_column = matches["debit"]
     credit_column = matches["credit"]
     currency_column = matches["currency"]
-    if description is None or (date_column is None and timestamp_column is None):
+    if description is None or date_column is None:
         return None
     if amount_column is not None:
         amount = SignedAmount(
@@ -133,21 +132,11 @@ def infer_universal_mapping(
     category = matches["category_hint"]
     subcategory = matches["subcategory_hint"] if category is not None else None
     date_format = _infer_date_format(inspection, date_column) if date_column is not None else None
-    timestamp_format = (
-        _infer_date_format(inspection, timestamp_column) if timestamp_column is not None else None
-    )
     if date_column is not None and date_format is None:
-        return None
-    if timestamp_column is not None and timestamp_format is None:
         return None
     return UniversalMappingSpec(
         transaction_date=DateSource(source_column=date_column, format=date_format)
         if date_column is not None
-        else None,
-        transaction_timestamp=TimestampSource(
-            source_column=timestamp_column, format=timestamp_format
-        )
-        if timestamp_column is not None
         else None,
         description=TextSource(source_column=description),
         amount=amount,

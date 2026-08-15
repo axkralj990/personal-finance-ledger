@@ -30,6 +30,21 @@ describe("universal mapping defaults", () => {
     expect(inferDateFormat({ ...inspection, preview }, "missing")).toBe("%Y-%m-%d");
   });
 
+  it("maps a single datetime column to the transaction date", () => {
+    const datetimeInspection = {
+      ...inspection,
+      columns: inspection.columns.map((column) => column.id === "c000"
+        ? { ...column, rawLabel: "Created At", normalizedLabel: "created at", inferredType: "TIMESTAMP" as const }
+        : column),
+      preview: [{ rowNumber: 2, values: { ...inspection.preview[0]!.values, c000: "2026-08-01T23:30:00" } }],
+    };
+
+    const plan = createManualPlan(datetimeInspection, "USD");
+
+    expect(plan.transactionDate).toEqual({ sourceColumn: "c000", format: "%Y-%m-%dT%H:%M:%S" });
+    expect(plan.transactionTimestamp).toBeNull();
+  });
+
   it("uses the safe standard for ambiguous dates", () => {
     const preview = [{ rowNumber: 2, values: { c000: "08/09/2026" } }];
     expect(inferDateFormat({ ...inspection, preview }, "c000")).toBe("%Y-%m-%d");
@@ -37,7 +52,7 @@ describe("universal mapping defaults", () => {
 
   it("reports incomplete required controls", () => {
     const plan = createManualPlan({ ...inspection, columns: [] }, "");
-    expect(mappingErrors(plan)).toEqual(expect.arrayContaining(["Map a date or timestamp column.", "Map a description column.", "Map an amount column.", "Enter a valid ISO 4217 currency constant."]));
+    expect(mappingErrors(plan)).toEqual(expect.arrayContaining(["Map a date or datetime column.", "Map a description column.", "Map an amount column.", "Enter a valid ISO 4217 currency constant."]));
   });
 
   it("rejects three-letter values that are not ISO 4217 currencies", () => {

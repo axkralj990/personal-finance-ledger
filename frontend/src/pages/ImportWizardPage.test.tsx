@@ -140,6 +140,10 @@ describe("ImportWizardPage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/profile/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Expense sign convention")).toHaveValue("EXPENSES_POSITIVE");
+    expect(screen.getByLabelText("Date or datetime source")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Timestamp")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Timestamp format")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Timestamp timezone")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Date format")).toHaveAttribute(
       "list",
       "mapping-date-formats",
@@ -168,10 +172,12 @@ describe("ImportWizardPage", () => {
     );
   });
 
-  it("detaches a selected template when edited and stages with the latest confirmation", async () => {
+  it("detaches a selected template and advances a staged batch to review", async () => {
     const user = userEvent.setup();
     prepare();
     vi.spyOn(api.imports, "previewMapping").mockResolvedValue(validPreview());
+    vi.spyOn(api.imports, "rows").mockResolvedValue([]);
+    vi.spyOn(api.taxonomy, "categories").mockResolvedValue([]);
     const confirm = vi
       .spyOn(api.imports, "confirmMapping")
       .mockResolvedValue({
@@ -182,7 +188,7 @@ describe("ImportWizardPage", () => {
       });
     const stage = vi
       .spyOn(api.imports, "stage")
-      .mockResolvedValue(batch("STAGING"));
+      .mockResolvedValue(batch("NEEDS_REVIEW", true));
     renderWizard("/imports/batch-1?step=map");
     await user.click(await screen.findByRole("radio", { name: /Account card/ }));
     await user.selectOptions(
@@ -203,6 +209,42 @@ describe("ImportWizardPage", () => {
       }),
     );
     expect(stage).toHaveBeenCalledWith("batch-1", 4, 1);
+    expect(
+      await screen.findByRole("heading", { name: "Review staged rows" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Confirm mapping and stage rows" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Remapping and staging will replace staged rows/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("advances a ready staged batch to commit", async () => {
+    const user = userEvent.setup();
+    prepare();
+    vi.spyOn(api.imports, "previewMapping").mockResolvedValue(validPreview());
+    vi.spyOn(api.imports, "confirmMapping").mockResolvedValue({
+      batchId: "batch-1",
+      revision: 4,
+      mappingRevision: 1,
+      plan: inspected.proposals.templates[0]!.plan,
+    });
+    vi.spyOn(api.imports, "stage").mockResolvedValue(batch("READY"));
+    renderWizard("/imports/batch-1?step=map");
+
+    const action = await screen.findByRole("button", {
+      name: "Confirm mapping and stage rows",
+    });
+    await waitFor(() => expect(action).toBeEnabled());
+    await user.click(action);
+
+    expect(
+      await screen.findByRole("heading", { name: "Commit 26 accepted rows" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Confirm mapping and stage rows" }),
+    ).not.toBeInTheDocument();
   });
 
   it.each([

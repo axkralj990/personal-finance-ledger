@@ -103,6 +103,25 @@ def test_alias_inference_does_not_guess_ambiguous_slash_dates(tmp_path: Path) ->
     assert infer_universal_mapping(inspection) is None
 
 
+def test_datetime_inference_maps_one_date_and_discards_time(tmp_path: Path) -> None:
+    path, inspection = _inspection(
+        tmp_path,
+        "Created At,Description,Amount,Currency\n"
+        "2026-08-01T23:30:00,Coffee,-4.50,EUR\n",
+    )
+
+    plan = infer_universal_mapping(inspection)
+
+    assert plan is not None
+    assert plan.transaction_date == DateSource(
+        source_column="c000", format="%Y-%m-%dT%H:%M:%S"
+    )
+    assert plan.transaction_timestamp is None
+    parsed = transform_rows(read_source_rows(path, inspection), inspection, plan)[0]
+    assert parsed.transaction_date == date(2026, 8, 1)
+    assert parsed.transaction_at is None
+
+
 def test_signed_amount_date_currency_and_taxonomy_transforms(tmp_path: Path) -> None:
     path, inspection = _inspection(
         tmp_path,

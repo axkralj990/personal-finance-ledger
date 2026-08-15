@@ -2,8 +2,7 @@ import type { ImportExecutionPlan, ImportInspection, MappingOrigin } from "../..
 import { isIso4217Currency } from "../../shared/currencies";
 
 const aliases: Record<string, string[]> = {
-  date: ["transaction date", "date", "booking date", "value date", "datum", "datum transakcije", "datum knjiženja", "datum bremenitve"],
-  timestamp: ["transaction timestamp", "timestamp", "completed date", "started date", "created at", "datetime", "date time"],
+  date: ["transaction date", "date", "booking date", "value date", "datum", "datum transakcije", "datum knjiženja", "datum bremenitve", "transaction timestamp", "timestamp", "completed date", "started date", "created at", "datetime", "date time"],
   description: ["description", "details", "merchant", "payee", "recipient", "opis", "memo", "narrative", "prejemnik", "prodajno mesto"],
   amount: ["amount", "transaction amount", "value", "net amount", "znesek"],
   debit: ["debit", "debit amount", "charge", "withdrawal", "breme", "odhodki"],
@@ -35,8 +34,9 @@ function match(inspection: ImportInspection, target: keyof typeof aliases, infer
 }
 
 export function createManualPlan(inspection: ImportInspection, defaultCurrency = ""): ImportExecutionPlan {
-  const date = match(inspection, "date", "DATE");
-  const timestamp = date ? "" : match(inspection, "timestamp", "TIMESTAMP");
+  const date = match(inspection, "date", "DATE")
+    || inspection.columns.find((column) => column.inferredType === "TIMESTAMP")?.id
+    || "";
   const signed = match(inspection, "amount", "NUMBER");
   const debit = match(inspection, "debit");
   const credit = match(inspection, "credit");
@@ -44,7 +44,7 @@ export function createManualPlan(inspection: ImportInspection, defaultCurrency =
   return {
     planType: "universal", schemaVersion: inspection.executionSchemaVersion || "universal-v1",
     transactionDate: date ? { sourceColumn: date, format: inferDateFormat(inspection, date) } : null,
-    transactionTimestamp: timestamp ? { sourceColumn: timestamp, format: inferDateFormat(inspection, timestamp), timezone: "UTC" } : null,
+    transactionTimestamp: null,
     description: { sourceColumn: match(inspection, "description", "TEXT"), strip: true, collapseWhitespace: true },
     amount: !signed && debit && credit
       ? { kind: "debit_credit", debitColumn: debit, creditColumn: credit, numberFormat, debitSourceSign: "positive", creditSourceSign: "positive" }
@@ -76,7 +76,7 @@ export function inferDateFormat(inspection: ImportInspection, sourceColumn: stri
 
 export function mappingErrors(plan: ImportExecutionPlan): string[] {
   const errors: string[] = [];
-  if (!plan.transactionDate?.sourceColumn && !plan.transactionTimestamp?.sourceColumn) errors.push("Map a date or timestamp column.");
+  if (!plan.transactionDate?.sourceColumn && !plan.transactionTimestamp?.sourceColumn) errors.push("Map a date or datetime column.");
   if (plan.transactionDate && !plan.transactionDate.format.trim()) errors.push("Enter an explicit date format.");
   if (plan.transactionTimestamp && !plan.transactionTimestamp.format.trim()) errors.push("Enter an explicit timestamp format.");
   if (plan.transactionTimestamp && !plan.transactionTimestamp.timezone.trim()) errors.push("Enter a timestamp timezone.");
